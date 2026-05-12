@@ -72,3 +72,4 @@ Thumbs.db
 
 # AgentDesk specific
 agentdesk.db
+temp/
