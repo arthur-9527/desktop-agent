@@ -110,69 +110,98 @@ curl -H "Authorization: Bearer admin123" \
 | quality | number | 80 | JPEG 压缩质量 (0-100) |
 | maxWidth | number | 1366 | 最大宽度 |
 | maxHeight | number | 768 | 最大高度 |
-| **showGrid** | boolean | false | **叠加精细化网格** |
-| gridSize | number | 16 | 子网格间距（像素） |
+| **showGrid** | boolean | false | **叠加归一化网格** |
+| targetGridCount | number | 64 | 目标网格数量（32/64/128，自动适配分辨率） |
 | gridColor | string | 255,0,0 | 网格颜色（RGB 格式） |
-| gridAlpha | number | 0.6 | 网格透明度（0-1） |
-| gridLineWidth | number | 2 | 网格线宽（像素） |
+| gridAlpha | number | 0.3 | 网格透明度（0-1） |
+| gridLineWidth | number | 1 | 网格线宽（像素） |
+| dashLength | number | 4 | 虚线段长度（像素） |
+| gapLength | number | 4 | 虚线间隙长度（像素） |
 
 **叠加网格示例：**
 
 ```bash
-# 带九宫格+点线网格截图
+# 带归一化网格截图
 curl -H "Authorization: Bearer admin123" \
   -o screenshot_with_grid.jpg \
   http://localhost:9877/api/screenshot?showGrid=true
 
-# 自定义网格配置
+# 自定义网格配置（128条网格线）
 curl -H "Authorization: Bearer admin123" \
   -o screenshot_custom_grid.jpg \
-  "http://localhost:9877/api/screenshot?showGrid=true&gridSize=8&gridColor=0,255,0&gridAlpha=0.4"
+  "http://localhost:9877/api/screenshot?showGrid=true&targetGridCount=128&gridColor=0,255,0&gridAlpha=0.4"
 ```
 
-**网格效果：**
+**归一化网格特点：**
 
 ```
-┌───────────┬───────────┬───────────┐  ← 九宫格（粗实线，2px）
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-├───────────┼───────────┼───────────┤
-│ · · · · · │ · · · · · │ · · · · · │  ← 点线网格（虚线，1px）
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-├───────────┼───────────┼───────────┤
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-│ · · · · · │ · · · · · │ · · · · · │
-└───────────┴───────────┴───────────┘
+┌─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┬─┐  ← 横向 64 条虚线（间距约 21px @1366px）
+│·│·│·│·│·│·│·│·│·│·│·│·│·│·│·│
+├─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┤
+│·│·│·│·│·│·│·│·│·│·│·│·│·│·│·│
+├─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┼─┤
+│·│·│·│·│·│·│·│·│·│·│·│·│·│·│·│
+│·│·│·│·│·│·│·│·│·│·│·│·│·│·│·│  ← 纵向 64 条虚线（间距约 12px @768px）
+│·│·│·│·│·│·│·│·│·│·│·│·│·│·│·│
+│·│·│·│·│·│·│·│·│·│·│·│·│·│·│·│
+└─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┴─┘
 ```
 
-**网格说明：**
+**网格系统说明：**
 
-| 层级 | 样式 | 间隔 | 线宽 | 颜色 | 作用 |
-|------|------|------|------|------|------|
-| 九宫格 | 粗实线 | 1/3、2/3 处 | 2px | rgba(255,0,0,0.6) | 宏观分区定位 |
-| 点线网格-横 | 虚线 | 每 16px | 1px | rgba(255,0,0,0.2) | 微观精确定位 |
-| 点线网格-竖 | 虚线 | 每 16px | 1px | rgba(255,0,0,0.2) | 微观精确定位 |
+| 特性 | 说明 |
+|------|------|
+| **自动适配** | 根据分辨率自动计算网格数量（32/64/128） |
+| **横竖统一** | 横向和纵向网格数量一致（64×64） |
+| **固定间距范围** | 网格间距自动保持在 12-24px 范围内 |
+| **2的幂次** | 网格数量为 2 的幂次，便于计算 |
+| **虚线样式** | 断续的点线，不遮挡屏幕内容 |
 
-**精度分析（以 1366x768 为例）：**
+**网格数量计算策略：**
 
-- 九宫格定位：确定哪个 1/9 区域
-- 点线网格定位：在区域内精确到 ±8px
-- 映射回原始屏幕：8 × 2.5 ≈ **±20px**
+```typescript
+// 固定间距范围 12-24px + 2的幂次
+MIN_SPACING = 12px, MAX_SPACING = 24px
+targetCount = 2^round(log2((minCount + maxCount) / 2))
+// 结果限制在 32-128 范围内
+```
 
-**为什么点线比实线更好？**
+**分辨率适配示例：**
 
-1. **视觉干扰小**：点线是断续的，不会遮挡/分割屏幕内容
-2. **AI 容易识别**：点线模式有明显规律，视觉模型容易理解
-3. **层次分明**：九宫格粗线 + 点线细线，层次清晰
+| 分辨率 | 网格数 | 横向间距 | 纵向间距 |
+|--------|--------|----------|----------|
+| 1920×1080 | 64 | 30px | 17px |
+| 1366×768 | 64 | 21px | 12px |
+| 1280×720 | 64 | 20px | 11px |
+| 2560×1440 | 128 | 20px | 11px |
+
+**返回的网格信息：**
+
+```json
+{
+  "frameData": { "data": "base64...", "width": 1366, "height": 768, "timestamp": 1234567890 },
+  "gridInfo": {
+    "horizontalCount": 64,
+    "verticalCount": 64,
+    "horizontalSpacing": 21,
+    "verticalSpacing": 12
+  }
+}
+```
+
+**AI 定位示例：**
+
+AI 可以使用网格坐标精确定位：
+- "第 32 行第 48 列的交叉点" → 自动转换为像素坐标
+- 网格信息让 AI 知道当前的网格配置，无需手动计算
+
+**为什么使用归一化网格？**
+
+1. **横竖统一**：横竖网格数量一致（64×64），位置描述简单
+2. **AI 友好**：网格坐标 (x=32, y=48) 比像素坐标 (x=687, y=389) 更易理解
+3. **自动适配**：不同分辨率自动调整，始终保持合理的网格密度
+4. **统一标准**：所有截图使用相同的网格系统，AI 无需针对不同分辨率做特殊处理
+5. **视觉干扰小**：虚线样式不会遮挡重要的屏幕内容
 
 ### 屏幕信息 API
 
@@ -226,14 +255,30 @@ curl -H "Authorization: Bearer admin123" \
 curl -H "Authorization: Bearer admin123" \
   -X POST http://localhost:9877/api/mouse \
   -d '{"action": "scroll", "direction": "up", "amount": 1}'
+
+# 拖拽操作（需要分三步：按下左键 -> 拖拽到目标位置 -> 释放左键）
+# 步骤1: 按下左键
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "press_left"}'
+
+# 步骤2: 拖拽到目标位置（可多次调用实现连续拖拽）
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "drag", "x": 500, "y": 500}'
+
+# 步骤3: 释放左键
+curl -H "Authorization: Bearer admin123" \
+  -X POST http://localhost:9877/api/mouse \
+  -d '{"action": "release_left"}'
 ```
 
 **请求体：**
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| action | string | move / left_click / right_click / double_click / scroll |
-| x | number | 归一化 X 坐标 (0-1000)，move/left_click 需要 |
-| y | number | 归一化 Y 坐标 (0-1000)，move/left_click 需要 |
+| action | string | move / left_click / right_click / double_click / scroll / drag / press_left / release_left |
+| x | number | 归一化 X 坐标 (0-1000)，move/left_click/drag 需要 |
+| y | number | 归一化 Y 坐标 (0-1000)，move/left_click/drag 需要 |
 | direction | string | up / down，scroll 需要 |
 | amount | number | 滚动量，scroll 需要 |
 
