@@ -1,12 +1,14 @@
 """核心 Agent Loop 模块"""
 
 import asyncio
+import platform
 from typing import Optional
 from openai import AsyncOpenAI
 
 from .agentdesk_client import AgentDeskClient
 from .action_executor import ActionExecutor
 from .prompts import build_system_prompt
+from .accessibility_parser import create_info_table
 
 
 class DeskAgent:
@@ -40,13 +42,15 @@ class DeskAgent:
         """
         self.action_executor = ActionExecutor(self.client)
 
-        # 获取无障碍树作为辅助提示（可选）
-        tree_hint = await self._get_accessibility_hint()
+        # 获取初始全局动态信息表
+        info_table = await self._get_global_info_table()
+        if info_table:
+            print(f"[全局信息] 已获取动态信息表")
 
         # 构建 system prompt
         system_prompt = build_system_prompt(task)
-        if tree_hint:
-            system_prompt += f"\n\n[无障碍树参考]\n{tree_hint}"
+        if info_table:
+            system_prompt += f"\n\n{info_table}"
 
         messages = [{"role": "system", "content": system_prompt}]
 
@@ -65,7 +69,14 @@ class DeskAgent:
                     "steps": step,
                 }
 
-            # 2. 构建消息
+            # 2. 更新全局动态信息表（每次操作后）
+            info_table = await self._get_global_info_table()
+
+            # 3. 构建消息
+            user_text = "继续执行任务。" if step > 0 else "开始执行任务。"
+            if info_table:
+                user_text += f"\n\n{info_table}"
+
             messages.append({
                 "role": "user",
                 "content": [
@@ -77,7 +88,7 @@ class DeskAgent:
                     },
                     {
                         "type": "text",
-                        "text": "继续执行任务。" if step > 0 else "开始执行任务。"
+                        "text": user_text
                     },
                 ]
             })
@@ -139,41 +150,34 @@ class DeskAgent:
             "steps": self.max_steps
         }
 
-    async def _get_accessibility_hint(self) -> str:
-        """获取无障碍树，压缩为简短文本提示（可选，失败不影响）"""
+    async def _get_global_info_table(self) -> str:
+        """获取全局动态信息表
+
+        纯代码处理，不经过 LLM，速度很快。
+        失败时返回空字符串，不影响主流程。
+        """
         try:
-            tree = await self.client.accessibility_tree(max_depth=3)
-            return self._format_tree(tree)
-        except Exception:
+            # 并行获取：无障碍树、鼠标位置、焦点元素
+            tree = await self.client.accessibility_tree(max_depth=10)
+
+            # 尝试获取鼠标位置和焦点元素（可选）
+            mouse_pos = None
+            focused = None
+            try:
+                mouse_pos = await self.client.mouse_position()
+            except Exception:
+                pass
+            try:
+                focused = await self.client.accessibility_focused()
+            except Exception:
+                pass
+
+            # 解析生成信息表
+            return create_info_table(tree, mouse_pos, focused)
+
+        except Exception as e:
+            print(f"[全局信息] 获取失败: {e}")
             return ""
-
-    def _format_tree(self, tree: dict) -> str:
-        """格式化无障碍树为简短文本"""
-        if not tree or "tree" not in tree:
-            return ""
-
-        lines = []
-
-        def walk(node, depth=0):
-            role = node.get("role", "?")
-            name = node.get("name", "")
-            bounds = node.get("bounds", {})
-
-            # 只保留可交互元素
-            if role in ("Button", "Edit", "MenuItem", "Hyperlink",
-                        "ListItem", "CheckBox", "TabItem", "ComboBox"):
-                line = f"{'  ' * depth}[{role}] {name}"
-                if bounds:
-                    line += f" @({bounds.get('x', 0)},{bounds.get('y', 0)})"
-                lines.append(line)
-
-            for child in node.get("children", []):
-                walk(child, depth + 1)
-
-        walk(tree["tree"])
-
-        # 限制最多 50 行
-        return "\n".join(lines[:50])
 
     def _trim_messages(self, messages: list) -> list:
         """滑动窗口：保留 system + 最近 N 轮对话

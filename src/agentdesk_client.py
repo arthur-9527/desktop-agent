@@ -174,13 +174,46 @@ class AgentDeskClient:
         )
         resp.raise_for_status()
 
-    # ---- 无障碍树（可选） ----
+    # ---- 无障碍树 ----
 
-    async def accessibility_tree(self, max_depth: int = 5) -> dict:
-        """获取无障碍树"""
+    async def accessibility_tree(self, max_depth: int = 10) -> dict:
+        """获取无障碍树
+
+        Args:
+            max_depth: 最大递归深度，默认 10
+
+        Returns:
+            {"tree": {...}}
+        """
         resp = await self._client.get(
             f"{self.base_url}/api/accessibility",
             params={"maxDepth": max_depth},
+            headers=self.auth,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def accessibility_focused(self) -> dict:
+        """获取当前焦点元素
+
+        Returns:
+            {"element": {"role": ..., "name": ..., "bounds": {...}}}
+        """
+        resp = await self._client.get(
+            f"{self.base_url}/api/accessibility/focused",
+            headers=self.auth,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def mouse_position(self) -> dict:
+        """获取鼠标位置（物理坐标）
+
+        Returns:
+            {"x": int, "y": int}
+        """
+        resp = await self._client.get(
+            f"{self.base_url}/api/mouse/position",
             headers=self.auth,
         )
         resp.raise_for_status()
