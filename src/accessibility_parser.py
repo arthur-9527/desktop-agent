@@ -267,14 +267,32 @@ class AccessibilityParser:
         # 判断是否可见
         is_visible = self._is_visible(bounds)
 
-        # 判断是否是激活窗口（简化：当前只检查可见性）
-        # TODO: 通过 focused_element 确定激活窗口
-        is_active = is_visible and len(info.windows) == 0  # 第一个可见窗口视为激活
+        # 判断是否是激活窗口（通过焦点元素判断）
+        is_active = False
+        if is_visible and focused_element:
+            # 检查焦点元素是否在这个窗口内
+            focused = focused_element.get("element", {})
+            focused_bounds = focused.get("bounds", {})
+            if focused_bounds:
+                # 检查焦点元素是否在窗口边界内
+                fx = focused_bounds.get("x", -1)
+                fy = focused_bounds.get("y", -1)
+                wx = bounds.get("x", 0)
+                wy = bounds.get("y", 0)
+                ww = bounds.get("width", 0)
+                wh = bounds.get("height", 0)
+                # 焦点在窗口内则视为激活
+                if wx <= fx <= wx + ww and wy <= fy <= wy + wh:
+                    is_active = True
+        
+        # 如果没有焦点信息，第一个可见窗口视为激活
+        if not is_active and is_visible and not any(w.is_active for w in info.windows):
+            is_active = True
 
         nx, ny = self._normalize_bounds(bounds)
 
-        # 提取窗口内的关键子元素
-        children = self._extract_interactive_children(node, depth=0, max_depth=3)
+        # 提取窗口内的关键子元素（只提取可见窗口的元素）
+        children = self._extract_interactive_children(node, depth=0, max_depth=3, window_visible=is_visible)
 
         window_info = WindowInfo(
             name=name,
@@ -286,8 +304,15 @@ class AccessibilityParser:
         )
         info.windows.append(window_info)
 
-    def _extract_interactive_children(self, node: dict, depth: int = 0, max_depth: int = 3) -> list:
-        """提取窗口内的可交互子元素"""
+    def _extract_interactive_children(self, node: dict, depth: int = 0, max_depth: int = 3, window_visible: bool = True) -> list:
+        """提取窗口内的可交互子元素
+        
+        Args:
+            node: 当前节点
+            depth: 当前深度
+            max_depth: 最大深度
+            window_visible: 父窗口是否可见
+        """
         result = []
 
         if depth > max_depth:
@@ -299,6 +324,10 @@ class AccessibilityParser:
             bounds = child.get("bounds", {})
 
             if role in self.INTERACTIVE_ROLES and bounds and name:
+                # 检查元素本身是否可见（过滤负数坐标）
+                if not self._is_visible(bounds):
+                    continue  # 跳过不可见/最小化的元素
+                
                 nx, ny = self._normalize_bounds(bounds)
                 result.append(ElementInfo(
                     name=name,
@@ -309,7 +338,7 @@ class AccessibilityParser:
                 ))
 
             # 递归
-            result.extend(self._extract_interactive_children(child, depth + 1, max_depth))
+            result.extend(self._extract_interactive_children(child, depth + 1, max_depth, window_visible))
 
         return result
 

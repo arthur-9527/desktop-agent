@@ -55,10 +55,8 @@ class DeskAgent:
         if info_table:
             print(f"[全局信息] 已获取动态信息表")
 
-        # 构建 system prompt
-        system_prompt = build_system_prompt(task)
-        if info_table:
-            system_prompt += f"\n\n{info_table}"
+        # 构建 system prompt（使用新的占位符方式）
+        system_prompt = build_system_prompt(task, global_info=info_table)
 
         messages = [{"role": "system", "content": system_prompt}]
 

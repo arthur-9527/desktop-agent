@@ -149,6 +149,33 @@ class ActionExecutor:
         self.client = client
         self.os_type = os_type
         self.key_mapper = KeyMapper(os_type)
+
+    @staticmethod
+    def sanitize_output(output: str) -> str:
+        """清洗模型输出中的格式问题
+
+        处理中文标点符号，转换为英文标点。
+
+        Args:
+            output: 原始模型输出
+
+        Returns:
+            清洗后的输出
+        """
+        # 替换中文括号为英文括号
+        output = output.replace('）', ')').replace('（', '(')
+        # 替换全角大括号
+        output = output.replace('｝', '}').replace('｛', '{')
+        # 替换全角中括号
+        output = output.replace('】', ']').replace('【', '[')
+        # 替换全角逗号
+        output = output.replace('，', ',')
+        # 替换全角冒号
+        output = output.replace('：', ':')
+        # 替换中文引号
+        output = output.replace('"', '"').replace('"', '"')
+        output = output.replace(''', "'").replace(''', "'")
+        return output
     
     def update_os(self, os_type: str):
         """更新操作系统类型
@@ -170,6 +197,9 @@ class ActionExecutor:
         Returns:
             解析后的动作字典，包含 action_type 和 action_inputs
         """
+        # 先清洗输出中的中文标点
+        model_output = self.sanitize_output(model_output)
+
         # 尝试使用官方解析器
         try:
             from ui_tars.action_parser import parse_action_to_structure_output
@@ -201,6 +231,12 @@ class ActionExecutor:
         # wait 动作
         if "wait" in output.lower():
             return {"action_type": "wait", "action_inputs": {}}
+
+        # move 动作（必须在 click 之前检查，因为 move 包含在 "click" 中）
+        if "move" in output.lower():
+            coords = self._extract_point(output)
+            if coords:
+                return {"action_type": "move", "action_inputs": {"start_box": str(list(coords))}}
 
         # click 动作
         if "click" in output.lower():
@@ -313,6 +349,11 @@ class ActionExecutor:
         if action_type == "click":
             x, y = self._get_coords(inputs)
             await self.client.mouse_click(x=int(x), y=int(y))
+
+        elif action_type == "move":
+            # 仅移动鼠标，不点击
+            x, y = self._get_coords(inputs)
+            await self.client.mouse_move(x=int(x), y=int(y))
 
         elif action_type == "left_double":
             x, y = self._get_coords(inputs)
