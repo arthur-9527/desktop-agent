@@ -21,7 +21,7 @@ class AgentDeskClient:
         max_height: int = 768,
         show_grid: bool = False
     ) -> dict:
-        """截图，返回 {"base64": ..., "width": ..., "height": ...}"""
+        """截图，返回 {"base64": ..., "width": ..., "height": ..., "grid_info": {...}}"""
         resp = await self._client.post(
             f"{self.base_url}/api/screenshot",
             json={
@@ -33,11 +33,23 @@ class AgentDeskClient:
             headers=self.auth,
         )
         resp.raise_for_status()
-        data = resp.json()
+        result = resp.json()
+        
+        # 兼容两种返回格式
+        if "frameData" in result:
+            # showGrid=true 时的格式
+            frame_data = result["frameData"]
+            grid_info = result.get("gridInfo", {})
+        else:
+            # showGrid=false 时的格式
+            frame_data = result
+            grid_info = None
+        
         return {
-            "base64": data["data"],
-            "width": data["width"],
-            "height": data["height"]
+            "base64": frame_data["data"],
+            "width": frame_data["width"],
+            "height": frame_data["height"],
+            "grid_info": grid_info  # None 或 {"horizontalCount": 64, "verticalCount": 64, ...}
         }
 
     # ---- 屏幕信息 ----

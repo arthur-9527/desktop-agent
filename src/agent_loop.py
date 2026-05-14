@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 from .agentdesk_client import AgentDeskClient
 from .action_executor import ActionExecutor
 from .prompts import build_system_prompt
-from .accessibility_parser import create_info_table
+from .accessibility_parser import create_info_table, AccessibilityParser, GlobalInfo
 
 
 class DeskAgent:
@@ -30,6 +30,8 @@ class DeskAgent:
         self.context_window_size = context_window_size  # 保留最近 N 步的截图
         self.debug = debug
         self.action_executor: Optional[ActionExecutor] = None
+        self.global_info: Optional[GlobalInfo] = None  # 缓存结构化全局信息
+        self._accessibility_parser = AccessibilityParser()
 
     async def run(self, task: str) -> dict:
         """执行任务
@@ -40,9 +42,15 @@ class DeskAgent:
         Returns:
             {"success": bool, "message": str, "steps": int}
         """
-        self.action_executor = ActionExecutor(self.client)
+        # 获取初始全局动态信息（结构化）
+        self.global_info = await self._get_global_info_struct()
+        os_type = self.global_info.os if self.global_info else "Windows"
+        print(f"[全局信息] 操作系统: {os_type}")
 
-        # 获取初始全局动态信息表
+        # 初始化 ActionExecutor，传入操作系统类型
+        self.action_executor = ActionExecutor(self.client, os_type=os_type)
+
+        # 获取初始全局动态信息表（文本格式，用于 prompt）
         info_table = await self._get_global_info_table()
         if info_table:
             print(f"[全局信息] 已获取动态信息表")
@@ -74,6 +82,14 @@ class DeskAgent:
 
             # 3. 构建消息
             user_text = "继续执行任务。" if step > 0 else "开始执行任务。"
+            
+            # 添加网格信息提示
+            grid_info = screenshot.get("grid_info")
+            if grid_info:
+                h_count = grid_info.get("horizontalCount", 64)
+                v_count = grid_info.get("verticalCount", 64)
+                user_text += f"\n\n[网格信息] 截图带有 {h_count}×{v_count} 归一化网格，坐标系统为 0-1000。"
+            
             if info_table:
                 user_text += f"\n\n{info_table}"
 
@@ -149,6 +165,19 @@ class DeskAgent:
             "message": "达到最大步数限制",
             "steps": self.max_steps
         }
+
+    async def _get_global_info_struct(self) -> Optional[GlobalInfo]:
+        """获取结构化的全局动态信息（用于内部逻辑判断）
+
+        Returns:
+            GlobalInfo 结构化数据，失败时返回 None
+        """
+        try:
+            tree = await self.client.accessibility_tree(max_depth=10)
+            return self._accessibility_parser.parse(tree, None, None)
+        except Exception as e:
+            print(f"[全局信息] 结构化数据获取失败: {e}")
+            return None
 
     async def _get_global_info_table(self) -> str:
         """获取全局动态信息表

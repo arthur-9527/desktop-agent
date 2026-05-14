@@ -2,19 +2,164 @@
 
 import asyncio
 import re
-from typing import Tuple, Optional
+from typing import Tuple, Optional, List
 
 from .agentdesk_client import AgentDeskClient
+
+
+class KeyMapper:
+    """按键映射器，根据操作系统转换按键名称
+    
+    LLM 输出格式: hotkey(key='ctrl c')
+    AgentDesk 接受格式: {"action": "press", "keys": ["ControlLeft", "C"]}
+    """
+    
+    # 通用映射（三个系统相同）
+    COMMON_MAP = {
+        "ctrl": "ControlLeft",
+        "control": "ControlLeft",
+        "alt": "AltLeft",
+        "shift": "ShiftLeft",
+        "enter": "Enter",
+        "return": "Enter",
+        "tab": "Tab",
+        "space": "Space",
+        "backspace": "Backspace",
+        "delete": "Delete",
+        "del": "Delete",
+        "esc": "Escape",
+        "escape": "Escape",
+        "up": "ArrowUp",
+        "down": "ArrowDown",
+        "left": "ArrowLeft",
+        "right": "ArrowRight",
+        "home": "Home",
+        "end": "End",
+        "pageup": "PageUp",
+        "pagedown": "PageDown",
+        "pgup": "PageUp",
+        "pgdn": "PageDown",
+        "insert": "Insert",
+        "ins": "Insert",
+        "capslock": "CapsLock",
+        "numlock": "NumLock",
+        "scrolllock": "ScrollLock",
+        "printscreen": "PrintScreen",
+        "prtsc": "PrintScreen",
+        "pause": "Pause",
+        "break": "Pause",
+    }
+    
+    # Windows 特有映射
+    WINDOWS_MAP = {
+        "win": "LeftWin",
+        "meta": "LeftWin",
+        "cmd": "LeftWin",
+        "super": "LeftWin",
+    }
+    
+    # macOS 特有映射
+    MACOS_MAP = {
+        "win": "LeftCmd",
+        "meta": "LeftCmd",
+        "cmd": "LeftCmd",
+        "super": "LeftCmd",
+        "command": "LeftCmd",
+        "option": "AltLeft",
+    }
+    
+    # Linux 特有映射
+    LINUX_MAP = {
+        "win": "MetaLeft",
+        "meta": "MetaLeft",
+        "cmd": "MetaLeft",
+        "super": "MetaLeft",
+    }
+    
+    def __init__(self, os_type: str = "Windows"):
+        """初始化按键映射器
+        
+        Args:
+            os_type: 操作系统类型 Windows / macOS / Linux
+        """
+        self.os_type = os_type
+    
+    def normalize(self, key: str) -> str:
+        """将 LLM 输出的按键名转换为 AgentDesk 接受的格式
+        
+        Args:
+            key: LLM 输出的按键名，如 'ctrl', 'c', 'enter'
+            
+        Returns:
+            AgentDesk 接受的按键名，如 'ControlLeft', 'C', 'Enter'
+        """
+        key_lower = key.lower()
+        
+        # 1. 通用映射
+        if key_lower in self.COMMON_MAP:
+            return self.COMMON_MAP[key_lower]
+        
+        # 2. 系统特定映射
+        os_map = {
+            "Windows": self.WINDOWS_MAP,
+            "macOS": self.MACOS_MAP,
+            "Linux": self.LINUX_MAP,
+        }
+        system_map = os_map.get(self.os_type, self.WINDOWS_MAP)
+        if key_lower in system_map:
+            return system_map[key_lower]
+        
+        # 3. 功能键 F1-F24
+        if key_lower.startswith("f") and key_lower[1:].isdigit():
+            fnum = int(key_lower[1:])
+            if 1 <= fnum <= 24:
+                return key.upper()
+        
+        # 4. 单字母转大写
+        if len(key) == 1 and key.isalpha():
+            return key.upper()
+        
+        # 5. 单数字
+        if len(key) == 1 and key.isdigit():
+            return key
+        
+        # 其他情况原样返回
+        return key
+    
+    def normalize_keys(self, keys: List[str]) -> List[str]:
+        """批量转换按键列表
+        
+        Args:
+            keys: 按键列表，如 ['ctrl', 'c']
+            
+        Returns:
+            转换后的按键列表，如 ['ControlLeft', 'C']
+        """
+        return [self.normalize(k) for k in keys]
 
 
 class ActionExecutor:
     """动作解析与执行器
 
     UI-TARS 1.5 输出 0-1000 归一化坐标，与 AgentDesk 坐标系一致，无需换算。
+    快捷键需要根据操作系统类型进行转换。
     """
 
-    def __init__(self, client: AgentDeskClient):
+    def __init__(self, client: AgentDeskClient, os_type: str = "Windows"):
         self.client = client
+        self.os_type = os_type
+        self.key_mapper = KeyMapper(os_type)
+    
+    def update_os(self, os_type: str):
+        """更新操作系统类型
+        
+        Args:
+            os_type: 操作系统类型 Windows / macOS / Linux
+        """
+        if os_type != self.os_type:
+            self.os_type = os_type
+            self.key_mapper = KeyMapper(os_type)
+            print(f"[KeyMapper] 操作系统更新为: {os_type}")
 
     def parse(self, model_output: str) -> dict:
         """解析 UI-TARS 模型输出
@@ -195,8 +340,11 @@ class ActionExecutor:
             await self.client.keyboard_type(inputs["content"])
 
         elif action_type == "hotkey":
-            keys = inputs.get("key", "").split()  # 官方格式: "ctrl c"
-            if keys:
+            # 使用 KeyMapper 转换按键名称
+            raw_keys = inputs.get("key", "").split()  # 官方格式: "ctrl c"
+            if raw_keys:
+                keys = self.key_mapper.normalize_keys(raw_keys)
+                print(f"[Hotkey] {raw_keys} -> {keys}")
                 await self.client.keyboard_hotkey(*keys)
 
         elif action_type == "wait":
