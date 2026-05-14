@@ -1,8 +1,9 @@
 """动作解析与执行模块"""
 
 import asyncio
+import json
 import re
-from typing import Tuple, Optional, List
+from typing import Tuple, Optional, List, Dict, Any
 
 from .agentdesk_client import AgentDeskClient
 
@@ -149,6 +150,7 @@ class ActionExecutor:
         self.client = client
         self.os_type = os_type
         self.key_mapper = KeyMapper(os_type)
+        self._last_input_check_result: str = ""  # 缓存最近的输入框检查结果
 
     @staticmethod
     def sanitize_output(output: str) -> str:
@@ -214,8 +216,8 @@ class ActionExecutor:
             if isinstance(result, list) and len(result) > 0:
                 return result[0]
             return {"action_type": "wait", "action_inputs": {}}
-        except ImportError:
-            # 如果官方包不可用，使用简化解析
+        except (ImportError, Exception) as e:
+            # 如果官方包不可用或解析失败，使用简化解析
             return self._simple_parse(model_output)
 
     def _simple_parse(self, output: str) -> dict:
@@ -227,6 +229,12 @@ class ActionExecutor:
             match = re.search(r"finished\s*\(\s*content\s*=\s*['\"](.+?)['\"]\s*\)", output, re.IGNORECASE)
             content = match.group(1) if match else "Task completed"
             return {"action_type": "finished", "action_inputs": {"content": content}}
+
+        # failed 动作
+        if "failed" in output.lower():
+            match = re.search(r"failed\s*\(\s*content\s*=\s*['\"](.+?)['\"]\s*\)", output, re.IGNORECASE)
+            content = match.group(1) if match else "Task failed"
+            return {"action_type": "failed", "action_inputs": {"content": content}}
 
         # wait 动作
         if "wait" in output.lower():
@@ -243,6 +251,8 @@ class ActionExecutor:
             coords = self._extract_point(output)
             if coords:
                 return {"action_type": "click", "action_inputs": {"start_box": str(list(coords))}}
+            # 没有坐标的 click（需要视觉定位后补充坐标）
+            return {"action_type": "click", "action_inputs": {}}
 
         # left_double 动作
         if "left_double" in output.lower() or "double" in output.lower():
@@ -280,11 +290,20 @@ class ActionExecutor:
                 direction = "right"
             return {"action_type": "scroll", "action_inputs": {"direction": direction}}
 
+        # check_input 动作
+        if "check_input" in output.lower():
+            return {"action_type": "check_input", "action_inputs": {}}
+
         # type 动作
         if "type" in output.lower():
-            match = re.search(r"type\s*\(\s*content\s*=\s*['\"](.+?)['\"]\s*\)", output, re.IGNORECASE | re.DOTALL)
-            if match:
-                return {"action_type": "type", "action_inputs": {"content": match.group(1)}}
+            # 匹配 content 和可选的 mode 参数
+            content_match = re.search(r"content\s*=\s*['\"](.+?)['\"]", output, re.IGNORECASE | re.DOTALL)
+            mode_match = re.search(r"mode\s*=\s*['\"](\w+)['\"]", output, re.IGNORECASE)
+            
+            if content_match:
+                content = content_match.group(1)
+                mode = mode_match.group(1) if mode_match else "replace"
+                return {"action_type": "type", "action_inputs": {"content": content, "mode": mode}}
 
         # hotkey 动作
         if "hotkey" in output.lower():
@@ -337,11 +356,12 @@ class ActionExecutor:
 
         return None
 
-    async def execute(self, parsed: dict):
+    async def execute(self, parsed: dict, ime_status: str = ""):
         """执行单个动作
 
         Args:
             parsed: 解析后的动作字典
+            ime_status: 当前输入法状态（可选），如 "中文模式" 或 "英文模式"
         """
         action_type = parsed.get("action_type", "wait")
         inputs = parsed.get("action_inputs", {})
@@ -357,7 +377,10 @@ class ActionExecutor:
 
         elif action_type == "left_double":
             x, y = self._get_coords(inputs)
-            await self.client.mouse_click(button="double", x=int(x), y=int(y))
+            # double_click 不支持坐标参数，需要先移动鼠标
+            await self.client.mouse_move(x=int(x), y=int(y))
+            await asyncio.sleep(0.1)
+            await self.client.mouse_click(button="double")
 
         elif action_type == "right_single":
             x, y = self._get_coords(inputs)
@@ -366,6 +389,9 @@ class ActionExecutor:
         elif action_type == "drag":
             x1, y1 = self._get_coords(inputs, key="start_box")
             x2, y2 = self._get_coords(inputs, key="end_box")
+            # 先移动到起点，再执行拖拽
+            await self.client.mouse_move(x=int(x1), y=int(y1))
+            await asyncio.sleep(0.1)
             # press_left → drag → release_left（三步）
             await self.client.mouse_down()
             await self.client.mouse_drag(int(x2), int(y2))
@@ -377,8 +403,18 @@ class ActionExecutor:
                 amount=1,
             )
 
+        elif action_type == "check_input":
+            # 检查输入框内容（通过无障碍树）
+            result = await self._check_input_via_accessibility()
+            self._last_input_check_result = result
+            print(f"[CheckInput] 结果: {result}")
+            # 返回结果，由 agent_loop 注入上下文
+
         elif action_type == "type":
-            await self.client.keyboard_type(inputs["content"])
+            # 智能输入：处理输入法和输入模式
+            content = inputs.get("content", "")
+            mode = inputs.get("mode", "replace")  # replace 或 append
+            await self._smart_type(content, mode, ime_status)
 
         elif action_type == "hotkey":
             # 使用 KeyMapper 转换按键名称
@@ -393,6 +429,10 @@ class ActionExecutor:
 
         elif action_type == "finished":
             # 任务完成，无需执行动作
+            pass
+
+        elif action_type == "failed":
+            # 任务失败，无需执行动作
             pass
 
         else:
@@ -419,3 +459,149 @@ class ActionExecutor:
             return (float(coords_str[0]), float(coords_str[1]))
 
         return (500.0, 500.0)
+    
+    def parse_planner_action(self, action_str: str) -> dict:
+        """解析 Planner 输出的 action 字符串
+        
+        Planner 输出格式: {"use_vision_prompt": null, "action": "click(point='<point>500 300</point>')"}
+        此方法解析 action 字段的字符串部分。
+        
+        Args:
+            action_str: action 字段的字符串，如 "click(point='<point>500 300</point>')"
+        
+        Returns:
+            解析后的动作字典，包含 action_type 和 action_inputs
+        """
+        # 清洗输出
+        action_str = self.sanitize_output(action_str.strip())
+        
+        # 使用现有的解析逻辑
+        return self.parse(action_str)
+    
+    def parse_planner_json(self, json_str: str) -> Dict[str, Any]:
+        """解析 Planner 的完整 JSON 输出
+        
+        Args:
+            json_str: Planner 输出的 JSON 字符串
+        
+        Returns:
+            解析后的字典，包含 use_vision_prompt 和解析后的 action
+            {
+                "use_vision_prompt": None 或 str,
+                "action_type": str,
+                "action_inputs": dict
+            }
+        """
+        # 清洗
+        json_str = self.sanitize_output(json_str.strip())
+        
+        # 尝试解析 JSON
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError:
+            # 尝试从文本中提取 JSON
+            json_match = re.search(r'\{[^{}]*"use_vision_prompt"[^{}]*\}', json_str)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group(0))
+                except json.JSONDecodeError:
+                    return {"use_vision_prompt": None, "action_type": "wait", "action_inputs": {}}
+            else:
+                return {"use_vision_prompt": None, "action_type": "wait", "action_inputs": {}}
+        
+        use_vision_prompt = data.get("use_vision_prompt")
+        action_str = data.get("action", "wait()")
+        
+        # 解析 action 字符串
+        parsed_action = self.parse_planner_action(action_str)
+        
+        return {
+            "use_vision_prompt": use_vision_prompt,
+            "action_type": parsed_action.get("action_type", "wait"),
+            "action_inputs": parsed_action.get("action_inputs", {}),
+        }
+    
+    async def _check_input_via_accessibility(self) -> str:
+        """通过无障碍树检查当前焦点输入框的内容
+        
+        Returns:
+            检查结果字符串，如 "当前值: 'xxx'" 或 "无法获取输入框内容"
+        """
+        try:
+            focused = await self.client.accessibility_focused()
+            element = focused.get("element", {})
+            
+            # 尝试获取 Value 属性
+            value = element.get("value", "")
+            name = element.get("name", "")
+            role = element.get("role", "")
+            
+            if value:
+                return f"当前值: '{value}'"
+            elif role in ("Edit", "TextInput", "ComboBox"):
+                # 输入框但值为空
+                return f"当前值: (空), 元素: {name}"
+            else:
+                return f"焦点元素: {role} '{name}', 无输入值"
+                
+        except Exception as e:
+            return f"无法获取输入框内容: {e}"
+    
+    async def _smart_type(self, content: str, mode: str = "replace", ime_status: str = ""):
+        """智能输入：自动处理输入法和输入模式
+        
+        Args:
+            content: 要输入的内容
+            mode: 输入模式，"replace" 替换，"append" 追加
+            ime_status: 当前输入法状态（可选），如 "中文模式" 或 "英文模式"
+        """
+        # 1. 判断内容类型
+        is_english_content = content.isascii()
+        need_english_ime = is_english_content
+        
+        # 2. 根据当前输入法状态和内容类型决定是否切换
+        if need_english_ime:
+            if "中文" in ime_status:
+                # 当前是中文模式，需要切换到英文
+                print(f"[SmartType] 当前中文模式，切换到英文")
+                await self.client.keyboard_hotkey("ShiftLeft")
+                await asyncio.sleep(0.2)  # 等待切换生效
+            else:
+                # 已经是英文模式或未知状态，假设可以输入
+                print(f"[SmartType] 输入法状态: {ime_status or '未知'}, 输入英文内容")
+        else:
+            # 中文内容
+            if "英文" in ime_status:
+                # 当前是英文模式，需要切换到中文
+                print(f"[SmartType] 当前英文模式，切换到中文")
+                await self.client.keyboard_hotkey("ShiftLeft")
+                await asyncio.sleep(0.2)
+            else:
+                print(f"[SmartType] 输入法状态: {ime_status or '未知'}, 输入中文内容")
+        
+        # 3. 根据模式处理
+        if mode == "replace":
+            # Ctrl+A 全选，然后输入会自动替换
+            print(f"[SmartType] 模式=replace, 先全选再输入")
+            await self.client.keyboard_hotkey("ControlLeft", "A")
+            await asyncio.sleep(0.1)  # 短暂等待
+        else:
+            print(f"[SmartType] 模式=append, 直接输入")
+        
+        # 4. 输入内容
+        await self.client.keyboard_type(content)
+        print(f"[SmartType] 已输入: {content}")
+    
+    def get_last_input_check_result(self) -> str:
+        """获取最近的输入框检查结果"""
+        return self._last_input_check_result
+    
+    async def ensure_english_input_method(self):
+        """确保输入法为英文模式
+        
+        通过按 Shift 切换输入法状态。
+        注意：这是一个"盲切换"，无法确定当前状态。
+        更可靠的方法是通过无障碍树读取托盘图标状态。
+        """
+        await self.client.keyboard_hotkey("ShiftLeft")
+        print("[InputMethod] 已切换输入法状态")

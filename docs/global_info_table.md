@@ -42,14 +42,19 @@
 | 音量 | (935, 957) | 36% |
 
 ### 当前窗口
-#### [激活] Visual Studio Code
+#### [激活][聚焦] Visual Studio Code
 状态: 可见
 关键元素:
   - [Button] Minimize (932, 16)
   - [Button] Close (977, 16)
   - [Edit] 文件搜索 (400, 200)
 
-#### [后台] Chrome
+#### [激活] Chrome
+状态: 可见
+关键元素:
+  - [Button] 新建标签页 (200, 100)
+
+#### [后台] 记事本
 状态: 最小化
 ```
 
@@ -133,7 +138,8 @@ class ElementInfo:
 class WindowInfo:
     """窗口信息"""
     name: str
-    is_active: bool
+    is_active: bool       # 是否激活（在桌面上展开，非最小化）
+    is_focused: bool      # 是否聚焦（当前键盘焦点所在窗口）
     is_visible: bool
     normalized_x: int
     normalized_y: int
@@ -164,14 +170,30 @@ def _is_visible(self, bounds: dict) -> bool:
     return x >= -100 and y >= -100
 ```
 
-### 激活窗口判断
+### 窗口状态判断
 
-通过 `GET /api/accessibility/focused` 获取焦点元素，然后反推所属窗口：
+窗口有两种状态属性：
+
+- **激活 (is_active)**: 窗口在桌面上展开（非最小化），等同于 `is_visible`
+- **聚焦 (is_focused)**: 当前键盘焦点所在的窗口，只有一个
+
+通过 `GET /api/accessibility/focused` 获取焦点元素，然后判断其所属窗口：
 
 ```python
-# TODO: 实现焦点元素到窗口的映射
-# 当前简化：第一个可见窗口视为激活窗口
+# 激活状态：窗口可见（非最小化）
+is_active = is_visible
+
+# 聚焦状态：焦点元素在窗口边界内
+if is_visible and focused_element:
+    focused_bounds = focused_element.get("bounds", {})
+    if wx <= focused_x <= wx + ww and wy <= focused_y <= wy + wh:
+        is_focused = True
 ```
+
+信息表中显示格式：
+- `[激活][聚焦]` - 展开且聚焦的窗口
+- `[激活]` - 展开但未聚焦的窗口
+- `[后台]` - 最小化的窗口
 
 ## 与 Agent Loop 集成
 

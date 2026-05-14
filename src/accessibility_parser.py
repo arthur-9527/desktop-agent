@@ -1,7 +1,7 @@
 """无障碍树解析器 - 生成全局动态信息表"""
 
 import platform
-from typing import Optional
+from typing import Optional, List
 from dataclasses import dataclass, field
 
 
@@ -20,7 +20,8 @@ class ElementInfo:
 class WindowInfo:
     """窗口信息"""
     name: str
-    is_active: bool
+    is_active: bool       # 是否激活（在桌面上展开，非最小化）
+    is_focused: bool      # 是否聚焦（当前键盘焦点所在窗口）
     is_visible: bool
     normalized_x: int = 0
     normalized_y: int = 0
@@ -257,18 +258,26 @@ class AccessibilityParser:
             ))
 
     def _process_window(self, node: dict, info: GlobalInfo, focused_element: Optional[dict] = None):
-        """处理窗口"""
+        """处理窗口
+        
+        概念说明：
+        - is_active: 窗口在桌面上展开（非最小化），等同于 is_visible
+        - is_focused: 当前键盘焦点所在的窗口，只有一个
+        """
         name = node.get("name", "")
         bounds = node.get("bounds", {})
 
         if not name:
             return
 
-        # 判断是否可见
+        # 判断是否可见（展开在桌面上）
         is_visible = self._is_visible(bounds)
+        
+        # 激活状态：窗口在桌面上展开（等同于可见）
+        is_active = is_visible
 
-        # 判断是否是激活窗口（通过焦点元素判断）
-        is_active = False
+        # 聚焦状态：当前键盘焦点所在的窗口
+        is_focused = False
         if is_visible and focused_element:
             # 检查焦点元素是否在这个窗口内
             focused = focused_element.get("element", {})
@@ -281,13 +290,13 @@ class AccessibilityParser:
                 wy = bounds.get("y", 0)
                 ww = bounds.get("width", 0)
                 wh = bounds.get("height", 0)
-                # 焦点在窗口内则视为激活
+                # 焦点在窗口内则视为聚焦
                 if wx <= fx <= wx + ww and wy <= fy <= wy + wh:
-                    is_active = True
+                    is_focused = True
         
-        # 如果没有焦点信息，第一个可见窗口视为激活
-        if not is_active and is_visible and not any(w.is_active for w in info.windows):
-            is_active = True
+        # 如果没有焦点信息，第一个可见窗口视为聚焦
+        if not is_focused and is_visible and not any(w.is_focused for w in info.windows):
+            is_focused = True
 
         nx, ny = self._normalize_bounds(bounds)
 
@@ -297,6 +306,7 @@ class AccessibilityParser:
         window_info = WindowInfo(
             name=name,
             is_active=is_active,
+            is_focused=is_focused,
             is_visible=is_visible,
             normalized_x=nx,
             normalized_y=ny,
@@ -472,7 +482,16 @@ class AccessibilityParser:
         if info.windows:
             lines.append("### 当前窗口")
             for win in info.windows:
-                status = "[激活]" if win.is_active else "[后台]"
+                # 构建状态标签：激活 + 聚焦
+                tags = []
+                if win.is_active:
+                    tags.append("[激活]")
+                if win.is_focused:
+                    tags.append("[聚焦]")
+                if not tags:
+                    tags.append("[后台]")
+                status = "".join(tags)
+                
                 visible = "可见" if win.is_visible else "最小化"
                 lines.append(f"#### {status} {win.name}")
                 lines.append(f"状态: {visible}")
@@ -483,6 +502,189 @@ class AccessibilityParser:
                 lines.append("")
 
         return "\n".join(lines)
+
+
+@dataclass
+class DiffResult:
+    """树对比结果"""
+    changed: bool = False                          # 是否有变化
+    window_changes: List[str] = field(default_factory=list)      # 窗口变化
+    focus_changes: List[str] = field(default_factory=list)       # 焦点变化
+    dialog_changes: List[str] = field(default_factory=list)      # 弹窗/对话框变化
+    element_changes: List[str] = field(default_factory=list)     # 元素属性变化
+    
+    def summary(self) -> str:
+        """生成变化摘要"""
+        if not self.changed:
+            return "无变化"
+        
+        parts = []
+        if self.window_changes:
+            parts.append(f"窗口: {', '.join(self.window_changes[:3])}")
+        if self.focus_changes:
+            parts.append(f"焦点: {', '.join(self.focus_changes[:3])}")
+        if self.dialog_changes:
+            parts.append(f"弹窗: {', '.join(self.dialog_changes[:3])}")
+        if self.element_changes:
+            parts.append(f"元素: {', '.join(self.element_changes[:3])}")
+        
+        return "; ".join(parts) if parts else "有变化"
+
+
+def diff_trees(before: dict, after: dict) -> DiffResult:
+    """对比两份无障碍树，检测变化
+    
+    纯代码执行，不调用 LLM。
+    
+    Args:
+        before: 操作前的无障碍树 {"tree": {...}}
+        after: 操作后的无障碍树 {"tree": {...}}
+    
+    Returns:
+        DiffResult 变化检测结果
+    """
+    result = DiffResult()
+    
+    before_root = before.get("tree", {}) if before else {}
+    after_root = after.get("tree", {}) if after else {}
+    
+    if not before_root or not after_root:
+        return result
+    
+    # 1. 提取窗口列表
+    before_windows = _extract_windows(before_root)
+    after_windows = _extract_windows(after_root)
+    
+    # 2. 检测窗口变化
+    before_names = {w["name"] for w in before_windows if w.get("name")}
+    after_names = {w["name"] for w in after_windows if w.get("name")}
+    
+    # 新窗口出现
+    new_windows = after_names - before_names
+    for name in new_windows:
+        result.window_changes.append(f"新窗口 '{name}'")
+    
+    # 窗口关闭
+    closed_windows = before_names - after_names
+    for name in closed_windows:
+        result.window_changes.append(f"窗口关闭 '{name}'")
+    
+    # 3. 检测弹窗/对话框变化
+    before_dialogs = _find_elements_by_role(before_root, {"Dialog", "Alert"})
+    after_dialogs = _find_elements_by_role(after_root, {"Dialog", "Alert"})
+    
+    if len(after_dialogs) > len(before_dialogs):
+        for dlg in after_dialogs[len(before_dialogs):]:
+            name = dlg.get("name", "未命名")
+            result.dialog_changes.append(f"新弹窗 '{name}'")
+    elif len(after_dialogs) < len(before_dialogs):
+        result.dialog_changes.append("弹窗已关闭")
+    
+    # 4. 检测焦点变化（通过激活窗口判断）
+    before_active = next((w for w in before_windows if w.get("is_active")), None)
+    after_active = next((w for w in after_windows if w.get("is_active")), None)
+    
+    if before_active and after_active:
+        if before_active.get("name") != after_active.get("name"):
+            result.focus_changes.append(
+                f"焦点从 '{before_active.get('name')}' 转移到 '{after_active.get('name')}'"
+            )
+    
+    # 5. 检测关键元素变化（按钮、输入框等）
+    before_buttons = _find_elements_by_role(before_root, {"Button"})
+    after_buttons = _find_elements_by_role(after_root, {"Button"})
+    
+    # 检测按钮文本变化
+    before_btn_texts = {b.get("name", "") for b in before_buttons}
+    after_btn_texts = {b.get("name", "") for b in after_buttons}
+    
+    new_btns = after_btn_texts - before_btn_texts
+    for btn_text in list(new_btns)[:5]:  # 最多记录5个
+        if btn_text:
+            result.element_changes.append(f"新按钮 '{btn_text}'")
+    
+    # 判断是否有变化
+    result.changed = bool(
+        result.window_changes or 
+        result.focus_changes or 
+        result.dialog_changes or 
+        result.element_changes
+    )
+    
+    return result
+
+
+def _extract_windows(root: dict) -> List[dict]:
+    """从无障碍树中提取所有窗口
+    
+    Args:
+        root: 树根节点
+    
+    Returns:
+        窗口列表，每个窗口包含 name, bounds, is_active
+    """
+    windows = []
+    
+    def walk(node, depth=0):
+        if not node or depth > 15:
+            return
+        
+        role = node.get("role", "")
+        name = node.get("name", "")
+        bounds = node.get("bounds", {})
+        
+        if role == "Window" and name:
+            # 判断是否可见
+            x = bounds.get("x", 0)
+            y = bounds.get("y", 0)
+            is_visible = x >= -100 and y >= -100
+            
+            windows.append({
+                "name": name,
+                "bounds": bounds,
+                "is_visible": is_visible,
+                "is_active": False  # 需要外部判断
+            })
+        
+        for child in node.get("children", []):
+            walk(child, depth + 1)
+    
+    walk(root)
+    
+    # 标记第一个可见窗口为激活（简化逻辑）
+    for w in windows:
+        if w["is_visible"]:
+            w["is_active"] = True
+            break
+    
+    return windows
+
+
+def _find_elements_by_role(root: dict, roles: set) -> List[dict]:
+    """按角色查找元素
+    
+    Args:
+        root: 树根节点
+        roles: 角色集合，如 {"Button", "Edit"}
+    
+    Returns:
+        匹配的元素列表
+    """
+    elements = []
+    
+    def walk(node, depth=0):
+        if not node or depth > 20:
+            return
+        
+        role = node.get("role", "")
+        if role in roles:
+            elements.append(node)
+        
+        for child in node.get("children", []):
+            walk(child, depth + 1)
+    
+    walk(root)
+    return elements
 
 
 def create_info_table(

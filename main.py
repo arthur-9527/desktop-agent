@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""DeskAgent 主入口"""
+"""DeskAgent 主入口 - 三模型架构
+
+三模型架构：
+- Planner (LLM): 主循环决策（每轮）
+- Grounding (UI-TARS): 视觉定位（按需）
+- Calibrator (LLM): 周期校准（每 N 步）
+"""
 
 import asyncio
 import sys
@@ -22,19 +28,39 @@ async def main():
         token=config.agentdesk_token,
     )
 
-    # UI-TARS 1.5 模型客户端
-    model = AsyncOpenAI(
+    # UI-TARS 视觉模型客户端 (Grounding)
+    vision_model = AsyncOpenAI(
         base_url=config.vision_base_url,
         api_key=config.vision_api_key,
     )
 
+    # Planner LLM 客户端
+    planner_model = AsyncOpenAI(
+        base_url=config.llm_base_url,
+        api_key=config.llm_api_key,
+    )
+
+    # Calibrator LLM 客户端（未配置时复用 Planner）
+    calibrator_model = None
+    if config.calibration_base_url:
+        calibrator_model = AsyncOpenAI(
+            base_url=config.calibration_base_url or config.llm_base_url,
+            api_key=config.calibration_api_key or config.llm_api_key,
+        )
+
     # 检查服务
-    if not await check_services(client, model, config):
+    if not await check_services(client, vision_model, config):
         print("\n服务检查失败，请检查配置后重试。")
         sys.exit(1)
 
     print("\n" + "=" * 50)
-    print("DeskAgent 已就绪")
+    print("DeskAgent 已就绪 (三模型架构)")
+    print("=" * 50)
+    print(f"  Planner: {config.general_model}")
+    print(f"  Vision:  {config.vision_model}")
+    if config.calibration_interval > 0:
+        calibration_model = config.calibration_model or config.general_model
+        print(f"  Calibrator: {calibration_model} (每 {config.calibration_interval} 步)")
     print("=" * 50)
 
     # 获取任务
@@ -53,11 +79,10 @@ async def main():
     # 创建 Agent
     agent = DeskAgent(
         agentdesk=client,
-        model=model,
-        model_name=config.vision_model,
-        max_steps=config.max_iterations,
-        context_window_size=config.context_window_size,
-        debug=config.debug,
+        vision_model=vision_model,
+        planner_model=planner_model,
+        calibrator_model=calibrator_model,
+        config=config,
     )
 
     # 执行任务
@@ -70,6 +95,16 @@ async def main():
     print(f"状态: {'成功 ✓' if result['success'] else '失败 ✗'}")
     print(f"步骤: {result['steps']}")
     print(f"信息: {result['message']}")
+    
+    # Metrics 报告
+    if result.get('metrics'):
+        metrics = result['metrics']
+        print("\nMetrics:")
+        print(f"  成功率: {metrics.get('success_rate', 'N/A')}")
+        print(f"  总耗时: {metrics.get('total_time_s', 0)}s")
+        print(f"  模型调用: Planner={metrics.get('model_calls', {}).get('planner', 0)}, "
+              f"Vision={metrics.get('model_calls', {}).get('vision', 0)}, "
+              f"Calibrator={metrics.get('model_calls', {}).get('calibrator', 0)}")
 
     # 关闭连接
     await client.close()
