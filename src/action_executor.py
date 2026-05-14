@@ -361,7 +361,7 @@ class ActionExecutor:
 
         Args:
             parsed: 解析后的动作字典
-            ime_status: 当前输入法状态（可选），如 "中文模式" 或 "英文模式"
+            ime_status: 当前输入法状态（从全局状态表获取）
         """
         action_type = parsed.get("action_type", "wait")
         inputs = parsed.get("action_inputs", {})
@@ -553,7 +553,7 @@ class ActionExecutor:
         Args:
             content: 要输入的内容
             mode: 输入模式，"replace" 替换，"append" 追加
-            ime_status: 当前输入法状态（可选），如 "中文模式" 或 "英文模式"
+            ime_status: 当前输入法状态（从全局状态表获取）
         """
         # 1. 判断内容类型
         is_english_content = content.isascii()

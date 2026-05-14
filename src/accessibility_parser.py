@@ -20,7 +20,6 @@ class ElementInfo:
 class WindowInfo:
     """窗口信息"""
     name: str
-    is_active: bool       # 是否激活（在桌面上展开，非最小化）
     is_focused: bool      # 是否聚焦（当前键盘焦点所在窗口）
     is_visible: bool
     normalized_x: int = 0
@@ -261,8 +260,8 @@ class AccessibilityParser:
         """处理窗口
         
         概念说明：
-        - is_active: 窗口在桌面上展开（非最小化），等同于 is_visible
         - is_focused: 当前键盘焦点所在的窗口，只有一个
+        - is_visible: 窗口是否可见（非最小化）
         """
         name = node.get("name", "")
         bounds = node.get("bounds", {})
@@ -272,9 +271,6 @@ class AccessibilityParser:
 
         # 判断是否可见（展开在桌面上）
         is_visible = self._is_visible(bounds)
-        
-        # 激活状态：窗口在桌面上展开（等同于可见）
-        is_active = is_visible
 
         # 聚焦状态：当前键盘焦点所在的窗口
         is_focused = False
@@ -305,7 +301,6 @@ class AccessibilityParser:
 
         window_info = WindowInfo(
             name=name,
-            is_active=is_active,
             is_focused=is_focused,
             is_visible=is_visible,
             normalized_x=nx,
@@ -482,18 +477,16 @@ class AccessibilityParser:
         if info.windows:
             lines.append("### 当前窗口")
             for win in info.windows:
-                # 构建状态标签：激活 + 聚焦
-                tags = []
-                if win.is_active:
-                    tags.append("[激活]")
-                if win.is_focused:
-                    tags.append("[聚焦]")
-                if not tags:
-                    tags.append("[后台]")
-                status = "".join(tags)
+                # 构建状态标签：只有聚焦和后台两种状态
+                if not win.is_visible:
+                    status = "[后台]"
+                elif win.is_focused:
+                    status = "[聚焦]"
+                else:
+                    status = ""
                 
                 visible = "可见" if win.is_visible else "最小化"
-                lines.append(f"#### {status} {win.name}")
+                lines.append(f"#### {status} {win.name}".strip())
                 lines.append(f"状态: {visible}")
                 if win.is_visible and win.children:
                     lines.append("关键元素:")
@@ -580,14 +573,14 @@ def diff_trees(before: dict, after: dict) -> DiffResult:
     elif len(after_dialogs) < len(before_dialogs):
         result.dialog_changes.append("弹窗已关闭")
     
-    # 4. 检测焦点变化（通过激活窗口判断）
-    before_active = next((w for w in before_windows if w.get("is_active")), None)
-    after_active = next((w for w in after_windows if w.get("is_active")), None)
+    # 4. 检测焦点变化（通过聚焦窗口判断）
+    before_focused = next((w for w in before_windows if w.get("is_focused")), None)
+    after_focused = next((w for w in after_windows if w.get("is_focused")), None)
     
-    if before_active and after_active:
-        if before_active.get("name") != after_active.get("name"):
+    if before_focused and after_focused:
+        if before_focused.get("name") != after_focused.get("name"):
             result.focus_changes.append(
-                f"焦点从 '{before_active.get('name')}' 转移到 '{after_active.get('name')}'"
+                f"焦点从 '{before_focused.get('name')}' 转移到 '{after_focused.get('name')}'"
             )
     
     # 5. 检测关键元素变化（按钮、输入框等）
@@ -621,7 +614,7 @@ def _extract_windows(root: dict) -> List[dict]:
         root: 树根节点
     
     Returns:
-        窗口列表，每个窗口包含 name, bounds, is_active
+        窗口列表，每个窗口包含 name, bounds, is_visible, is_focused
     """
     windows = []
     
@@ -643,7 +636,7 @@ def _extract_windows(root: dict) -> List[dict]:
                 "name": name,
                 "bounds": bounds,
                 "is_visible": is_visible,
-                "is_active": False  # 需要外部判断
+                "is_focused": False  # 需要外部判断
             })
         
         for child in node.get("children", []):
@@ -651,10 +644,10 @@ def _extract_windows(root: dict) -> List[dict]:
     
     walk(root)
     
-    # 标记第一个可见窗口为激活（简化逻辑）
+    # 标记第一个可见窗口为聚焦（简化逻辑）
     for w in windows:
         if w["is_visible"]:
-            w["is_active"] = True
+            w["is_focused"] = True
             break
     
     return windows

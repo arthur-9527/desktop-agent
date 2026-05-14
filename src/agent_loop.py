@@ -414,8 +414,9 @@ class DeskAgent:
                 step_metric.verification_time_ms = 0
                 self._history.add(f"Step {step + 1}: [成功] {action_type} - 无验证标准")
             
-            # 更新无障碍树（用于全局信息展示，不再用于验证）
+            # 更新无障碍树和全局状态表
             raw_tree_after = await self._get_accessibility_tree()
+            self.global_info = self._accessibility_parser.parse(raw_tree_after, None, None)
             
             # ========== Step 5: 校准检查 ==========
             if self._should_calibrate(step + 1):
