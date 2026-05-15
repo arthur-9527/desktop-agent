@@ -974,6 +974,75 @@ def _find_elements_by_role(root: dict, roles: set) -> List[dict]:
     return elements
 
 
+def diff_focused(focused_before: dict, focused_after: dict):
+    """对比聚焦元素变化，生成可读的差异描述
+
+    对应 diff_a11y.py 中 compare_focused() 的思路，
+    将聚焦变化作为独立维度提供给 LLM 做综合判断。
+
+    Args:
+        focused_before: 操作前的聚焦元素 {"element": {...}}
+        focused_after: 操作后的聚焦元素 {"element": {...}}
+
+    Returns:
+        (diff_text, has_changed) — 聚焦变化的可读描述 + 是否有变化
+    """
+    elem_before = (focused_before or {}).get("element") or {}
+    elem_after = (focused_after or {}).get("element") or {}
+
+    if not elem_before and not elem_after:
+        return ("（无聚焦元素信息）", False)
+
+    if not elem_before:
+        return (f"操作前无聚焦元素 → 操作后: [{elem_after.get('role', '?')}] {elem_after.get('name', '')}", True)
+
+    if not elem_after:
+        return (f"操作前: [{elem_before.get('role', '?')}] {elem_before.get('name', '')} → 操作后无聚焦元素", True)
+
+    lines = []
+    has_changed = False
+
+    role_before = elem_before.get("role", "?")
+    role_after = elem_after.get("role", "?")
+    name_before = elem_before.get("name", "")
+    name_after = elem_after.get("name", "")
+
+    if role_before != role_after or name_before != name_after:
+        lines.append(f"聚焦元素变化: [{role_before}] '{name_before}' → [{role_after}] '{name_after}'")
+        has_changed = True
+    else:
+        lines.append(f"聚焦元素: [{role_before}] '{name_before}'")
+
+    # Bounds
+    bounds_before = elem_before.get("bounds", {})
+    bounds_after = elem_after.get("bounds", {})
+    if bounds_before != bounds_after:
+        lines.append(f"  位置: {bounds_before} → {bounds_after}")
+        has_changed = True
+
+    # State
+    state_before = elem_before.get("state", {})
+    state_after = elem_after.get("state", {})
+    if isinstance(state_before, dict) and isinstance(state_after, dict):
+        for key in ["focused", "checked", "selected", "expanded"]:
+            b = state_before.get(key)
+            a = state_after.get(key)
+            if b != a and (b is not None or a is not None):
+                lines.append(f"  state.{key}: {b} → {a}")
+                has_changed = True
+
+    # Value
+    value_before = elem_before.get("value", "")
+    value_after = elem_after.get("value", "")
+    if value_before != value_after:
+        b_val = str(value_before)[:50]
+        a_val = str(value_after)[:50]
+        lines.append(f"  value: '{b_val}' → '{a_val}'")
+        has_changed = True
+
+    return ("\n".join(lines), has_changed)
+
+
 def create_info_table(
     tree: dict,
     mouse_pos: Optional[dict] = None,

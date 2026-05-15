@@ -15,10 +15,11 @@ from openai import AsyncOpenAI
 from .desktoptools import DesktopClient
 from .action_executor import ActionExecutor
 from .accessibility_parser import (
-    create_info_table, 
-    AccessibilityParser, 
+    create_info_table,
+    AccessibilityParser,
     GlobalInfo,
     diff_trees,
+    diff_focused,
 )
 from .prompts import (
     PromptBuilder,
@@ -376,8 +377,24 @@ class DeskAgent:
             # 调试模式
             if self.debug:
                 input("按 Enter 执行此动作...")
-            
-            # 执行动作
+
+            # ========== Step 3.5: 执行前采集快照（用于 accessibility/mixed 验证） ==========
+            # 提前解析验证配置
+            verification = parsed.get("verification", {}) or {}
+            verification_method = verification.get("method", "visual") if isinstance(verification, dict) else "visual"
+            verification_prompt = verification.get("prompt", "") if isinstance(verification, dict) else str(verification)
+
+            tree_before_action = None
+            focused_before_action = None
+            if verification_method in ("accessibility", "mixed"):
+                print(f"[验证] 方法: {verification_method}，执行前采集树和聚焦快照")
+                tree_before_action = await self._get_accessibility_tree_depth(15)
+                try:
+                    focused_before_action = await self.client.accessibility_focused()
+                except Exception as e:
+                    print(f"[验证] 获取聚焦元素失败: {e}")
+
+            # ========== Step 4: 执行操作 ==========
             timer.start()
             try:
                 # 获取输入法状态（从托盘信息）
@@ -391,53 +408,42 @@ class DeskAgent:
                 self._history.add(f"Step {step + 1}: [执行失败] {action_type} - {e}")
                 self._metrics.add_step(step_metric)
                 continue
-            
+
             # 特殊处理：check_input 结果注入上下文
             if action_type == "check_input":
                 check_result = self.action_executor.get_last_input_check_result()
                 self._history.add(f"Step {step + 1}: [检查输入框] {check_result}")
                 step_metric.success = True
                 self._metrics.add_step(step_metric)
-                
+
                 # 注入结果到消息历史，让 Planner 决定下一步
                 messages.append({
                     "role": "user",
                     "content": f"输入框检查结果: {check_result}\n\n请根据这个信息决定输入策略 (replace/append)。"
                 })
                 continue  # 回到 Step 1，让 Planner 基于检查结果决策
-            
+
             # 等待界面更新
             await asyncio.sleep(0.5)
-            
-            # ========== Step 4: 验证（三种方式：accessibility/visual/mixed） ==========
-            # 获取验证配置
-            verification = parsed.get("verification", {}) or {}
-            verification_method = verification.get("method", "visual") if isinstance(verification, dict) else "visual"
-            verification_prompt = verification.get("prompt", "") if isinstance(verification, dict) else str(verification)
-            
-            # 执行前保存无障碍树（用于 accessibility/mixed 验证）
-            tree_before_action = None
-            if verification_method in ("accessibility", "mixed"):
-                print(f"[验证] 方法: {verification_method}，执行前保存无障碍树")
-                tree_before_action = await self._get_accessibility_tree_depth(15)
-            
+
+            # ========== Step 5: 验证（三种方式：accessibility/visual/mixed） ==========
             if verification_prompt:
                 timer.start()
-                
+
                 # 根据验证方法选择验证方式
                 if verification_method == "accessibility":
                     success, reason, verification_time = await self._verify_with_accessibility(
-                        verification_prompt, tree_before_action
+                        verification_prompt, tree_before_action, focused_before_action
                     )
                 elif verification_method == "mixed":
                     success, reason, verification_time = await self._verify_mixed(
-                        verification_prompt, tree_before_action
+                        verification_prompt, tree_before_action, focused_before_action
                     )
                 else:  # 默认 visual
                     success, reason, verification_time = await self._verify_with_vision(verification_prompt)
-                
+
                 step_metric.verification_time_ms = verification_time
-                
+
                 if success:
                     print(f"[验证] 操作成功: {reason}")
                     step_metric.success = True
@@ -452,11 +458,11 @@ class DeskAgent:
                 step_metric.success = True
                 step_metric.verification_time_ms = 0
                 self._history.add(f"Step {step + 1}: [成功] {action_type} - 无验证标准")
-            
+
             # 更新无障碍树和全局状态表
             raw_tree_after = await self._get_accessibility_tree()
             self.global_info = self._accessibility_parser.parse(raw_tree_after, None, None)
-            
+
             # 更新 info_table 为最新状态（用于校准后的 system prompt 重建）
             info_table = await self._get_info_table_from_tree(raw_tree_after)
             
@@ -951,110 +957,129 @@ class DeskAgent:
             return {}
     
     async def _verify_with_accessibility(
-        self, 
-        verification_prompt: str, 
-        tree_before: dict
+        self,
+        verification_prompt: str,
+        tree_before: dict,
+        focused_before: dict = None,
     ) -> tuple:
-        """使用无障碍树差异验证操作是否成功
-        
+        """使用无障碍树差异 + 聚焦元素变化验证操作是否成功
+
+        同时对比两个维度的数据：
+        1. 聚焦元素变化（从 diff_a11y.py 方案借鉴）
+        2. 无障碍树结构变化
+
         Args:
             verification_prompt: 验证标准描述
             tree_before: 操作前的无障碍树
-        
+            focused_before: 操作前的聚焦元素 {"element": {...}}
+
         Returns:
             (success, reason, time_ms) 元组
         """
         timer = MetricsTimer()
         timer.start()
-        
+
         try:
-            # 执行后获取无障碍树（depth=15）
+            # 获取操作后无障碍树
             print("[验证] 获取执行后无障碍树...")
             tree_after = await self._get_accessibility_tree_depth(15)
-            
-            # 对比差异
+
+            # 获取操作后聚焦元素
+            focused_after = None
+            try:
+                focused_after = await self.client.accessibility_focused()
+            except Exception as e:
+                print(f"[验证] 获取聚焦元素失败: {e}")
+
+            # 维度 1: 对比聚焦元素
+            focus_diff, focus_changed = diff_focused(focused_before, focused_after)
+            print(f"[验证] 聚焦变化: {focus_diff[:200]}")
+
+            # 维度 2: 对比无障碍树
             print("[验证] 对比无障碍树差异...")
             diff_result = diff_trees(tree_before, tree_after)
-            
-            if not diff_result.changed:
-                print("[验证] 无障碍树无变化")
-                return (False, "无障碍树无变化，操作可能未生效", timer.stop())
-            
-            # 使用新的 format_for_llm() 生成带上下文的差异摘要
-            diff_text = diff_result.format_for_llm(max_items=15)
-            print(f"[验证] 差异摘要:\n{diff_text[:800]}")
-            
-            # 调用 LLM 分析差异
+            tree_diff = diff_result.format_for_llm(max_items=15) if diff_result.changed else "无障碍树结构无变化"
+            print(f"[验证] 树差异:\n{tree_diff[:300]}")
+
+            # 两个维度都无变化时直接返回
+            if not diff_result.changed and not focus_changed:
+                print("[验证] 聚焦元素和无障碍树均无变化")
+                return (False, "聚焦元素和无障碍树均无变化，操作可能未生效", timer.stop())
+
+            # 调用 LLM 分析两个维度的差异
             verification_prompt_text = build_accessibility_verification_prompt(
                 verification_prompt=verification_prompt,
-                diff_summary=diff_text
+                focus_diff=focus_diff,
+                tree_diff=tree_diff,
             )
-            
+
             response = await self.planner_model.chat.completions.create(
                 model=self.config.general_model,
                 messages=[{"role": "user", "content": verification_prompt_text}],
                 max_tokens=256,
                 temperature=0.1,
             )
-            
+
             result = response.choices[0].message.content or ""
             parsed = self._parse_verification_result(result)
-            
+
             if parsed:
                 success = parsed.get("success", False)
                 reason = parsed.get("reason", "解析失败")
             else:
                 success = False
                 reason = f"无障碍树验证解析失败: {result[:100]}"
-            
+
             return (success, reason, timer.stop())
-            
+
         except Exception as e:
             print(f"[验证] 无障碍树验证异常: {e}")
             return (False, f"无障碍树验证异常: {str(e)}", timer.stop())
-    
+
     async def _verify_mixed(
-        self, 
-        verification_prompt: str, 
-        tree_before: dict
+        self,
+        verification_prompt: str,
+        tree_before: dict,
+        focused_before: dict = None,
     ) -> tuple:
-        """使用混合验证（无障碍树 + 视觉）
-        
+        """使用混合验证（无障碍树 + 聚焦 + 视觉）
+
         Args:
             verification_prompt: 验证标准描述
             tree_before: 操作前的无障碍树
-        
+            focused_before: 操作前的聚焦元素
+
         Returns:
             (success, reason, time_ms) 元组
         """
         timer = MetricsTimer()
         timer.start()
-        
+
         try:
-            # 先进行无障碍树验证
-            print("[验证] 混合验证 - 第一步：无障碍树验证")
+            # 先进行无障碍树 + 聚焦验证
+            print("[验证] 混合验证 - 第一步：无障碍树 + 聚焦验证")
             accessibility_success, accessibility_reason, _ = await self._verify_with_accessibility(
-                verification_prompt, tree_before
+                verification_prompt, tree_before, focused_before
             )
-            
+
             # 如果无障碍树验证通过，直接返回成功
             if accessibility_success:
                 print("[验证] 无障碍树验证通过，混合验证成功")
                 return (True, f"无障碍树验证通过: {accessibility_reason}", timer.stop())
-            
+
             # 如果无障碍树验证失败，进行视觉验证作为补充
             print("[验证] 混合验证 - 第二步：视觉验证补充")
             vision_success, vision_reason, _ = await self._verify_with_vision(verification_prompt)
-            
-            # 综合判断：无障碍树失败但视觉通过，可能是树更新延迟，仍算成功
+
+            # 综合判断
             if vision_success:
                 print("[验证] 视觉验证通过，混合验证成功")
                 return (True, f"视觉验证通过(无障碍树延迟): {vision_reason}", timer.stop())
-            
+
             # 两者都失败
             print("[验证] 无障碍树和视觉验证都失败")
             return (False, f"无障碍树: {accessibility_reason}; 视觉: {vision_reason}", timer.stop())
-            
+
         except Exception as e:
             print(f"[验证] 混合验证异常: {e}")
             return (False, f"混合验证异常: {str(e)}", timer.stop())
