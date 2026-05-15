@@ -581,11 +581,15 @@ class DeskAgent:
             视觉定位结果描述，失败返回 None
         """
         try:
-            # 截图
-            screenshot = await self.client.screenshot(show_grid=True)
+            # 截图（强制使用 grid_level=64）
+            screenshot = await self.client.screenshot(show_grid=True, grid_level=64)
             
-            # 构建视觉定位 prompt
-            vision_prompt = build_vision_prompt(target_description)
+            # 构建视觉定位 prompt（传入截图尺寸用于计算网格格子像素大小）
+            vision_prompt = build_vision_prompt(
+                target_description,
+                screenshot_width=screenshot['width'],
+                screenshot_height=screenshot['height']
+            )
             
             # 调用 UI-TARS
             response = await self.vision_model.chat.completions.create(

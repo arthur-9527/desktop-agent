@@ -19,17 +19,21 @@ class AgentDeskClient:
         quality: int = 60,
         max_width: int = 1366,
         max_height: int = 768,
-        show_grid: bool = False
+        show_grid: bool = False,
+        grid_level: int = 64
     ) -> dict:
         """截图，返回 {"base64": ..., "width": ..., "height": ..., "grid_info": {...}}"""
+        body = {
+            "quality": quality,
+            "maxWidth": max_width,
+            "maxHeight": max_height,
+            "showGrid": show_grid
+        }
+        if show_grid and grid_level:
+            body["gridLevel"] = grid_level
         resp = await self._client.post(
             f"{self.base_url}/api/screenshot",
-            json={
-                "quality": quality,
-                "maxWidth": max_width,
-                "maxHeight": max_height,
-                "showGrid": show_grid
-            },
+            json=body,
             headers=self.auth,
         )
         resp.raise_for_status()

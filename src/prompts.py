@@ -62,21 +62,21 @@ failed(content='原因')                     # 任务失败
 - **completed**: 已完成的步骤索引列表
 
 #### use_vision_prompt
-- **null**: 直接执行 action，无需视觉定位
-- **字符串**: 需要先调用视觉模型定位，描述你要找的元素
+- **null**: Execute action directly, no visual grounding needed
+- **string**: Need to call vision model for grounding first, describe the element you want to find
 
-当你在全局状态表中找不到目标元素坐标时，设置 use_vision_prompt 描述目标元素。描述应包含：
-1. 目标元素的**空间位置**（哪个窗口/对话框内，屏幕区域）
-2. 目标元素的**视觉特征**（颜色、形状、文字标签）
-3. 与**周围元素的关系**（在 X 左侧、在 Y 上方）
+When you cannot find the target element coordinates in the global state table, set use_vision_prompt to describe the target element. The description should include:
+1. **Spatial position** of the target element (which window/dialog, screen area)
+2. **Visual features** of the target element (color, shape, text label)
+3. **Relationship with surrounding elements** (left of X, above Y)
 
 #### verification_prompt
-- **字符串**: 操作验证标准，用于操作后验证是否成功。描述操作成功后应该看到什么。
+- **string**: Operation verification criteria, used to verify success after the operation. Describe what you should see after a successful operation.
 
-操作后系统会截图并通过视觉模型验证。你需要描述验证标准，例如：
-- 点击按钮后："确认对话框中出现了'保存成功'提示"
-- 打开应用后："浏览器窗口已打开，显示主界面"
-- 关闭窗口后："对话框已消失，回到桌面"
+After the operation, the system will take a screenshot and verify through the vision model. You need to describe the verification criteria, for example:
+- After clicking a button: "Confirm that a 'Save successful' prompt appears in the dialog"
+- After opening an app: "Browser window has opened, showing the main interface"
+- After closing a window: "Dialog has disappeared, returned to desktop"
 
 ### 示例
 
@@ -94,21 +94,21 @@ failed(content='原因')                     # 任务失败
 }}
 ```
 
-需要视觉定位：
+Need visual grounding:
 ```json
 {{
-  "thought": "在设置窗口中找到并点击保存按钮",
+  "thought": "Find and click the save button in the settings window",
   "plan_status": {{
-    "steps": ["找到保存按钮", "点击保存", "等待保存完成"],
+    "steps": ["Find the save button", "Click save", "Wait for save to complete"],
     "current": 0,
     "completed": []
   }},
-  "use_vision_prompt": "右下角设置窗口中绿色保存按钮，位于取消按钮左侧",
+  "use_vision_prompt": "Green save button in the bottom-right settings window, located to the left of the cancel button",
   "action": "click"
 }}
 ```
 
-注意：当 use_vision_prompt 不为 null 时，action 只需指定动作类型（如 "click"），坐标由视觉模型返回后在下一步决策中使用。
+Note: When use_vision_prompt is not null, action only needs to specify the action type (e.g., "click"). Coordinates will be returned by the vision model and used in the next decision step.
 
 ## 输入操作规则
 
@@ -256,34 +256,44 @@ CALIBRATOR_PROMPT = """你是一个任务执行校准器。你的职责是审视
 # 视觉定位 Prompt（UI-TARS）
 # ============================================================================
 
-VISION_GROUNDING_PROMPT = """请根据截图找到以下目标元素：
+VISION_GROUNDING_PROMPT = """Please locate the following target element based on the screenshot:
 
 {target_description}
 
-## 任务
+## Task
 
-1. 在截图中定位目标元素
-2. 如果找到，返回元素的中心坐标（使用 `<point>x y</point>` 格式）
-3. 简要描述你看到的元素和它的位置
-4.请仔细检查截图，仔细分辨地址栏和搜索栏等相似元素，确保验证的准确性。
+1. Locate the target element in the screenshot
+2. If found, return the center coordinates of the element (using `<point>x y</point>` format)
+3. Briefly describe the element you see and its position
+4. !!!VERY IMPORTANT!!! Please carefully distinguish between similar elements such as the address bar and search bar in the browser. The one with a magnifying glass icon is usually the search bar.
 
-## 坐标说明
+## Coordinate System
 
-截图使用 0-1000 归一化坐标系。左上角为 (0, 0)，右下角为 (1000, 1000)。
+The screenshot uses a 0-1000 normalized coordinate system. The top-left corner is (0, 0), and the bottom-right corner is (1000, 1000).
+
+## Grid Information
+
+The screenshot has a grid overlay to help you locate elements precisely:
+- **Large cells**: 4 columns × 4 rows = 16 large cells (thick red lines)
+- **Small cells**: Each large cell is subdivided into 4×4 = 16 small cells (thin dashed lines)
+- **Large cell size**: {large_cell_width} × {large_cell_height} pixels
+- **Small cell size**: {small_cell_width} × {small_cell_height} pixels
+
+Use the grid lines to estimate coordinates more accurately. First identify which large cell the target is in, then refine the position using the small cells.
 """
 
 # ============================================================================
 # 视觉验证 Prompt（操作后验证是否成功）
 # ============================================================================
 
-VERIFICATION_PROMPT = """请根据截图验证操作是否成功完成。
+VERIFICATION_PROMPT = """Please verify whether the operation was completed successfully based on the screenshot.
 
-验证标准: {verification_prompt}
-！！！非常重要：请仔细检查截图，仔细分辨地址栏和搜索栏等相似元素，确保验证的准确性。
-请以 JSON 格式回答：
+Verification Criteria: {verification_prompt}
+!!!VERY IMPORTANT: Please carefully examine the screenshot and distinguish between similar elements such as the address bar and search bar to ensure verification accuracy.
+Please answer in JSON format:
 {{
   "success": true/false,
-  "reason": "简要说明理由"
+  "reason": "Brief explanation"
 }}
 """
 
@@ -368,17 +378,33 @@ def build_calibrator_prompt(task: str, history_summary: str, global_info: str = 
     return prompt
 
 
-def build_vision_prompt(target_description: str) -> str:
+def build_vision_prompt(
+    target_description: str,
+    screenshot_width: int = 1024,
+    screenshot_height: int = 768
+) -> str:
     """构建视觉定位提示词
 
     Args:
         target_description: 目标元素描述
+        screenshot_width: 截图宽度（像素）
+        screenshot_height: 截图高度（像素）
 
     Returns:
         完整的提示词
     """
+    # 计算网格格子大小（grid level 64: 4x4 大格子，每个大格子 4x4 小格子）
+    large_cell_width = screenshot_width // 4
+    large_cell_height = screenshot_height // 4
+    small_cell_width = large_cell_width // 4
+    small_cell_height = large_cell_height // 4
+    
     prompt = VISION_GROUNDING_PROMPT.format(
-        target_description=target_description
+        target_description=target_description,
+        large_cell_width=large_cell_width,
+        large_cell_height=large_cell_height,
+        small_cell_width=small_cell_width,
+        small_cell_height=small_cell_height
     )
     return prompt
 
