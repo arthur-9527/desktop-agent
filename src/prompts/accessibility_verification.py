@@ -6,42 +6,16 @@
 """
 
 
-ACCESSIBILITY_VERIFICATION_PROMPT = """请根据操作前后的聚焦元素变化和无障碍树结构差异，综合判断操作是否成功。
+ACCESSIBILITY_VERIFICATION_PROMPT = """判断操作是否成功。
 
-## 验证标准
+验证目标: {verification_prompt}
+聚焦变化: {focus_diff}
+树差异: {tree_diff}
 
-{verification_prompt}
+规则：聚焦变化即使无树变化也可能成功；树变化是强信号；两者都无变化则很可能失败。
 
-## 聚焦元素变化
-
-{focus_diff}
-
-## 无障碍树结构变化
-
-{tree_diff}
-
-## 请分析
-
-1. 聚焦元素变化是否表明操作达到了预期效果？
-2. 无障碍树结构变化是否支持这一判断？
-3. 综合两个维度，验证标准是否满足？
-
-注意：
-- 聚焦变化（如焦点转移到目标元素）即使无障碍树结构无变化，也可能意味着操作成功
-- 无障碍树结构变化（如弹窗出现）是强信号，应重点参考
-- 两个维度都无变化时，操作很可能未生效
-
-请用 JSON 格式回答：
-
-```json
-{{
-  "success": true/false,
-  "reason": "简要说明判断依据，引用具体的聚焦变化和/或树差异"
-}}
-```
-
-- `success`: true 表示验证通过，false 表示验证失败
-- `reason`: 简要解释为什么判断成功或失败
+返回JSON:
+{{"success": true/false, "reason": "判断依据"}}
 """
 
 

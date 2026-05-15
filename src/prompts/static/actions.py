@@ -3,24 +3,22 @@
 
 AVAILABLE_ACTIONS = """## 可用动作
 
-你可以输出 JSON 格式的动作。action 字段支持以下类型：
-
 ### 鼠标动作
 | 动作 | 格式 | 说明 |
 |------|------|------|
-| click | `click(point='<point>x y</point>')` | 左键点击指定坐标 |
-| left_double | `left_double(point='<point>x y</point>')` | 双击指定坐标 |
-| right_single | `right_single(point='<point>x y</point>')` | 右键点击指定坐标 |
-| move | `move(point='<point>x y</point>')` | 移动鼠标到指定位置 |
-| drag | `drag(start_point='<point>x1 y1</point>', end_point='<point>x2 y2</point>')` | 拖拽操作 |
-| scroll | `scroll(point='<point>x y</point>', direction='down/up/left/right')` | 滚动（需先移动鼠标） |
+| click | `click(point='<point>x y</point>')` | 左键点击 |
+| left_double | `left_double(point='<point>x y</point>')` | 双击 |
+| right_single | `right_single(point='<point>x y</point>')` | 右键点击 |
+| move | `move(point='<point>x y</point>')` | 移动鼠标 |
+| drag | `drag(start_point='<point>x1 y1</point>', end_point='<point>x2 y2</point>')` | 拖拽 |
+| scroll | `scroll(point='<point>x y</point>', direction='down/up/left/right')` | 滚动 |
 
 ### 键盘动作
 | 动作 | 格式 | 说明 |
 |------|------|------|
 | hotkey | `hotkey(key='ctrl c')` | 快捷键，按键用空格分隔 |
-| type | `type(content='xxx', mode='replace')` | 输入文本，mode: replace(替换)/append(追加) |
-| check_input | `check_input()` | 检查当前焦点输入框的内容 |
+| type | `type(content='xxx', mode='replace')` | 输入文本，mode: replace/append |
+| check_input | `check_input()` | 检查当前焦点输入框内容 |
 
 ### 系统动作
 | 动作 | 格式 | 说明 |
@@ -31,39 +29,25 @@ AVAILABLE_ACTIONS = """## 可用动作
 
 ## 动作示例
 
-从状态表获取坐标 → 直接操作：
+直接操作（坐标来自全局信息表）：
 ```json
 {{
-  "thought": "桌面有浏览器图标，直接双击打开",
-  "plan_status": {{
-    "steps": ["双击浏览器图标", "等待浏览器启动", "验证浏览器窗口"],
-    "current": 0,
-    "completed": []
-  }},
+  "thought": "双击桌面浏览器图标",
+  "plan_status": {{"steps": ["双击浏览器", "等待启动", "验证窗口"], "current": 0, "completed": []}},
   "use_vision_prompt": null,
   "action": "left_double(point='<point>500 300</point>')",
-  "verification": {{
-    "method": "accessibility",
-    "prompt": "验证浏览器窗口是否已打开"
-  }}
+  "verification": {{"method": "accessibility", "prompt": "浏览器窗口是否已打开"}}
 }}
 ```
 
-需要视觉定位：
+视觉定位（全局信息表找不到时）：
 ```json
 {{
-  "thought": "在设置窗口中找不到保存按钮，需要视觉定位",
-  "plan_status": {{
-    "steps": ["找到保存按钮", "点击保存", "等待保存完成"],
-    "current": 0,
-    "completed": []
-  }},
-  "use_vision_prompt": "绿色的保存按钮，位于设置窗口底部，在取消按钮左侧",
+  "thought": "需要视觉定位保存按钮",
+  "plan_status": {{"steps": ["找到保存按钮", "点击保存", "等待完成"], "current": 0, "completed": []}},
+  "use_vision_prompt": "设置窗口底部的绿色保存按钮，在取消按钮左侧",
   "action": "click",
-  "verification": {{
-    "method": "visual",
-    "prompt": "验证保存成功的提示是否出现"
-  }}
+  "verification": {{"method": "visual", "prompt": "保存成功提示是否出现"}}
 }}
 ```
 """

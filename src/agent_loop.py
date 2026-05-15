@@ -387,7 +387,8 @@ class DeskAgent:
             tree_before_action = None
             focused_before_action = None
             if verification_method in ("accessibility", "mixed"):
-                print(f"[验证] 方法: {verification_method}，执行前采集树和聚焦快照")
+                print(f"[验证] 方法: {verification_method}，验证目标: {verification_prompt}")
+                print(f"[验证] 执行前采集树和聚焦快照")
                 tree_before_action = await self._get_accessibility_tree_depth(15)
                 try:
                     focused_before_action = await self.client.accessibility_focused()
@@ -429,6 +430,7 @@ class DeskAgent:
             # ========== Step 5: 验证（三种方式：accessibility/visual/mixed） ==========
             if verification_prompt:
                 timer.start()
+                print(f"[验证] 开始验证，验证目标: {verification_prompt}")
 
                 # 根据验证方法选择验证方式
                 if verification_method == "accessibility":
@@ -452,6 +454,12 @@ class DeskAgent:
                     print(f"[验证] 操作失败: {reason}")
                     step_metric.success = False
                     self._history.add(f"Step {step + 1}: [失败] {action_type} - {reason}")
+
+                # 将验证结果注入上下文，让 Planner 下一步决策时能直接看到
+                messages.append({
+                    "role": "user",
+                    "content": f"验证结果: {'成功' if success else '失败'} - {reason}"
+                })
             else:
                 # 没有验证标准，默认成功
                 print(f"[验证] 无验证标准，默认成功")
@@ -641,7 +649,7 @@ class DeskAgent:
             screenshot = await self.client.screenshot(show_grid=True, grid_level=64)
             
             # 构建视觉定位 prompt（传入截图尺寸用于计算网格格子像素大小）
-            vision_prompt = build_vision_prompt(
+            vision_prompt = build_vision_grounding_prompt(
                 target_description,
                 screenshot_width=screenshot['width'],
                 screenshot_height=screenshot['height']
@@ -980,7 +988,7 @@ class DeskAgent:
         timer.start()
 
         try:
-            # 获取操作后无障碍树
+            print(f"[验证] 无障碍树验证 - 验证目标: {verification_prompt}")
             print("[验证] 获取执行后无障碍树...")
             tree_after = await self._get_accessibility_tree_depth(15)
 
@@ -1016,7 +1024,7 @@ class DeskAgent:
             response = await self.planner_model.chat.completions.create(
                 model=self.config.general_model,
                 messages=[{"role": "user", "content": verification_prompt_text}],
-                max_tokens=256,
+                max_tokens=8192,
                 temperature=0.1,
             )
 
@@ -1056,7 +1064,7 @@ class DeskAgent:
         timer.start()
 
         try:
-            # 先进行无障碍树 + 聚焦验证
+            print(f"[验证] 混合验证 - 验证目标: {verification_prompt}")
             print("[验证] 混合验证 - 第一步：无障碍树 + 聚焦验证")
             accessibility_success, accessibility_reason, _ = await self._verify_with_accessibility(
                 verification_prompt, tree_before, focused_before

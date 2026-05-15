@@ -10,7 +10,6 @@ from .static import (
     AVAILABLE_ACTIONS,
     EXECUTION_RULES,
     OUTPUT_FORMAT,
-    VERIFICATION_METHODS,
     get_shortcuts,
 )
 
@@ -37,9 +36,8 @@ class PromptBuilder:
         - 系统角色定义
         - 可用动作列表
         - 快捷键参考（根据 OS 类型）
-        - 执行规则
+        - 执行规则（含验证方式说明）
         - 输出格式
-        - 验证方式说明
         
         Returns:
             完整的静态提示词
@@ -61,8 +59,6 @@ class PromptBuilder:
             EXECUTION_RULES,
             "",  # 空行分隔
             OUTPUT_FORMAT,
-            "",  # 空行分隔
-            VERIFICATION_METHODS,
         ]
         
         self._static_prompt = "\n".join(parts)
