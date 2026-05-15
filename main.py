@@ -11,7 +11,7 @@ import asyncio
 import sys
 from openai import AsyncOpenAI
 
-from src.agentdesk_client import AgentDeskClient
+from src.desktoptools import DesktopClient
 from src.agent_loop import DeskAgent
 from src.config import get_config
 from src.utils import check_services
@@ -22,7 +22,7 @@ async def main():
     config = get_config()
 
     # AgentDesk 客户端
-    client = AgentDeskClient(
+    client = DesktopClient(
         host=config.agentdesk_host,
         port=config.agentdesk_port,
         token=config.agentdesk_token,

@@ -5,7 +5,7 @@ import json
 import re
 from typing import Tuple, Optional, List, Dict, Any
 
-from .agentdesk_client import AgentDeskClient
+from .desktoptools import DesktopClient
 
 
 class KeyMapper:
@@ -146,7 +146,7 @@ class ActionExecutor:
     快捷键需要根据操作系统类型进行转换。
     """
 
-    def __init__(self, client: AgentDeskClient, os_type: str = "Windows"):
+    def __init__(self, client: DesktopClient, os_type: str = "Windows"):
         self.client = client
         self.os_type = os_type
         self.key_mapper = KeyMapper(os_type)

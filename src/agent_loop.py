@@ -12,7 +12,7 @@ import re
 from typing import Optional, List
 from openai import AsyncOpenAI
 
-from .agentdesk_client import AgentDeskClient
+from .desktoptools import DesktopClient
 from .action_executor import ActionExecutor
 from .accessibility_parser import (
     create_info_table, 
@@ -114,7 +114,7 @@ class DeskAgent:
     
     def __init__(
         self,
-        agentdesk: AgentDeskClient,
+        agentdesk: DesktopClient,
         vision_model: AsyncOpenAI,  # UI-TARS
         planner_model: AsyncOpenAI,  # LLM for planning
         calibrator_model: Optional[AsyncOpenAI] = None,  # LLM for calibration

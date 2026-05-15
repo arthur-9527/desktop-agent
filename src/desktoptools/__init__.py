@@ -1,11 +1,11 @@
 """DesktopTools - AgentDesk HTTP API 封装
 
 提供：
+- DesktopClient: 统一客户端，封装原子操作和屏幕信息缓存
 - DesktopAtomicOps: 18 个 HTTP 原子操作
-- DesktopActions: 6 个高层动作（鼠标5 + 键盘1）
 """
 
+from .client import DesktopClient
 from .atomic_ops import DesktopAtomicOps
-from .actions import DesktopActions
 
-__all__ = ["DesktopAtomicOps", "DesktopActions"]
+__all__ = ["DesktopClient", "DesktopAtomicOps"]

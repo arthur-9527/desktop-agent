@@ -1,11 +1,11 @@
 """工具函数模块"""
 
 from openai import AsyncOpenAI
-from .agentdesk_client import AgentDeskClient
+from .desktoptools import DesktopClient
 from .config import Config
 
 
-async def check_services(client: AgentDeskClient, model: AsyncOpenAI, config: Config) -> bool:
+async def check_services(client: DesktopClient, model: AsyncOpenAI, config: Config) -> bool:
     """检查服务状态
 
     Args:
