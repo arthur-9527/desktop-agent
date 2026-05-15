@@ -22,12 +22,13 @@ from .accessibility_parser import (
     diff_focused,
 )
 from .prompts import (
-    PromptBuilder,
+    PromptBuilder, 
     build_planner_prompt, 
     build_calibrator_prompt,
     build_vision_grounding_prompt,
     build_vision_verification_prompt,
     build_accessibility_verification_prompt,
+    build_verification_prompt,
 )
 from .metrics import RunMetrics, StepMetric, MetricsTimer
 from .config import Config
@@ -642,18 +643,14 @@ class DeskAgent:
             target_description: 目标元素描述
         
         Returns:
-            视觉定位结果描述，失败返回 None
+            包含归一化坐标的结果描述，失败返回 None
         """
         try:
             # 截图（不带网格）
             screenshot = await self.client.screenshot()
 
             # 构建视觉定位 prompt
-            vision_prompt = build_vision_grounding_prompt(
-                target_description,
-                screenshot_width=screenshot['width'],
-                screenshot_height=screenshot['height'],
-            )
+            vision_prompt = build_vision_grounding_prompt(target_description)
             
             # 调用 UI-TARS
             response = await self.vision_model.chat.completions.create(
@@ -682,6 +679,13 @@ class DeskAgent:
             
             # 标准化坐标格式：将 <point x1="..." y1="..."> 转换为 <point>x y</point>
             result = self._normalize_point_format(result)
+            
+            # 解析像素坐标并转换为归一化坐标 (0-1000)
+            pixel_x, pixel_y = self._parse_pixel_coordinates(result)
+            if pixel_x is not None and pixel_y is not None:
+                normalized_x, normalized_y = self._pixel_to_normalized(pixel_x, pixel_y)
+                result = f"目标已定位: 归一化坐标 ({normalized_x}, {normalized_y})"
+                print(f"[Vision] 像素坐标 ({pixel_x}, {pixel_y}) -> 归一化坐标 ({normalized_x}, {normalized_y})")
             
             return result
             
@@ -778,6 +782,51 @@ class DeskAgent:
             print(f"[Vision] 坐标格式已标准化")
         
         return normalized
+    
+    def _parse_pixel_coordinates(self, text: str) -> tuple:
+        """从文本中解析像素坐标
+        
+        从 UI-TARS 返回的文本中提取 <point>x y</point> 格式的像素坐标
+        
+        Args:
+            text: 包含坐标的文本
+        
+        Returns:
+            (pixel_x, pixel_y) 或 (None, None) 如果未找到坐标
+        """
+        # 匹配 <point>x y</point> 格式
+        match = re.search(r'<point\s+(\d+)\s+(\d+)[\s>]', text)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+        
+        # 尝试 <point x1="..." y1="..."> 格式
+        match = re.search(r'<point\s+x1="(\d+)"\s+y1="(\d+)"[^>]*>', text)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+        
+        return None, None
+    
+    def _pixel_to_normalized(self, pixel_x: int, pixel_y: int) -> tuple:
+        """将像素坐标转换为归一化坐标 (0-1000)
+        
+        使用截图配置的固定尺寸进行转换：
+        SCREENSHOT_MAX_WIDTH = 1366
+        SCREENSHOT_MAX_HEIGHT = 768
+        
+        Args:
+            pixel_x: 像素 X 坐标
+            pixel_y: 像素 Y 坐标
+        
+        Returns:
+            (normalized_x, normalized_y)
+        """
+        width = self.config.screenshot_max_width   # 1366
+        height = self.config.screenshot_max_height  # 768
+        
+        normalized_x = int(pixel_x * 1000 / width)
+        normalized_y = int(pixel_y * 1000 / height)
+        
+        return normalized_x, normalized_y
     
     def _should_calibrate(self, step: int) -> bool:
         """判断是否应该触发校准"""

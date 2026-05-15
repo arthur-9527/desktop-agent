@@ -16,22 +16,18 @@ VISION_GROUNDING_PROMPT = """Please locate the following target element based on
 
 
 def build_vision_grounding_prompt(
-    target_description: str,
-    screenshot_width: int = 1024,
-    screenshot_height: int = 768,
+    target_description: str
 ) -> str:
     """Build the vision grounding prompt.
 
     Args:
         target_description: Description of the target element to locate.
-        screenshot_width: Screenshot width in pixels (informational).
-        screenshot_height: Screenshot height in pixels (informational).
 
     Returns:
         The formatted prompt string.
     """
     return VISION_GROUNDING_PROMPT.format(
-        target_description=target_description,
+        target_description=target_description
     )
 
 

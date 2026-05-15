@@ -587,6 +587,12 @@ class ActionExecutor:
         # 4. 输入内容
         await self.client.keyboard_type(content)
         print(f"[SmartType] 已输入: {content}")
+        
+        # 5. 等待输入完成（根据内容长度自动计算）
+        #    每20个字符约10秒（0.5秒/字符）
+        actual_wait = len(content) * 0.5
+        print(f"[SmartType] 等待输入完成: {actual_wait:.1f}s (内容长度={len(content)})")
+        await asyncio.sleep(actual_wait)
     
     def get_last_input_check_result(self) -> str:
         """获取最近的输入框检查结果"""
