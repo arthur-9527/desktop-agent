@@ -191,7 +191,7 @@ class ActionExecutor:
             print(f"[KeyMapper] 操作系统更新为: {os_type}")
 
     def parse(self, model_output: str) -> dict:
-        """解析 UI-TARS 模型输出
+        """解析模型输出（自研解析器，不依赖 UI-TARS）
 
         Args:
             model_output: 模型原始输出文本
@@ -202,23 +202,8 @@ class ActionExecutor:
         # 先清洗输出中的中文标点
         model_output = self.sanitize_output(model_output)
 
-        # 尝试使用官方解析器
-        try:
-            from ui_tars.action_parser import parse_action_to_structure_output
-            result = parse_action_to_structure_output(
-                model_output,
-                factor=1,
-                origin_resized_height=768,
-                origin_resized_width=1366,
-                model_type="UI-TARS-1.5-7B",
-            )
-            # parse_action_to_structure_output 返回 list，取第一个
-            if isinstance(result, list) and len(result) > 0:
-                return result[0]
-            return {"action_type": "wait", "action_inputs": {}}
-        except (ImportError, Exception) as e:
-            # 如果官方包不可用或解析失败，使用简化解析
-            return self._simple_parse(model_output)
+        # 使用自研解析器
+        return self._simple_parse(model_output)
 
     def _simple_parse(self, output: str) -> dict:
         """简化的动作解析器（备用）"""
