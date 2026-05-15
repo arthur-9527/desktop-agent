@@ -169,12 +169,15 @@ class DeskAgent:
         # 初始化 ActionExecutor
         self.action_executor = ActionExecutor(self.client, os_type=os_type)
         
+        # 初始化 PromptBuilder（复用缓存）
+        self._prompt_builder = PromptBuilder(os_type=os_type)
+        
         # 构建 Planner system prompt
-        system_prompt = build_planner_prompt(
-            task=task, 
+        system_prompt = self._prompt_builder.build_system_message(
             global_info=info_table,
+            execution_plan="",
             history="",
-            execution_plan=""
+            instruction=task
         )
         
         # Planner 消息历史
@@ -324,8 +327,21 @@ class DeskAgent:
                         "content": f"视觉定位结果: {vision_result}\n\n请根据这个信息重新决策下一步动作。"
                     })
                 else:
+                    # 视觉定位失败，注入恢复策略，让 Planner 知道如何应对
+                    recovery_message = (
+                        f"视觉定位失败，无法找到目标元素。\n\n"
+                        f"建议恢复策略：\n"
+                        f"1. 检查目标元素是否在可见区域内，尝试滚动页面寻找\n"
+                        f"2. 使用无障碍树中的元素 ID 尝试点击（如已知）\n"
+                        f"3. 尝试更通用的描述重新视觉定位\n"
+                        f"4. 如果目标确实不可见，考虑使用快捷键或其他方式导航"
+                    )
                     self._history.add(f"Step {step + 1}: [视觉定位失败] {use_vision_prompt[:50]}")
                     step_metric.error = "视觉定位失败"
+                    messages.append({
+                        "role": "user",
+                        "content": recovery_message
+                    })
                 
                 self._metrics.add_step(step_metric)
                 continue  # 回到 Step 1，让 Planner 基于新信息决策
@@ -441,6 +457,9 @@ class DeskAgent:
             raw_tree_after = await self._get_accessibility_tree()
             self.global_info = self._accessibility_parser.parse(raw_tree_after, None, None)
             
+            # 更新 info_table 为最新状态（用于校准后的 system prompt 重建）
+            info_table = await self._get_info_table_from_tree(raw_tree_after)
+            
             # ========== Step 5: 校准检查 ==========
             if self._should_calibrate(step + 1):
                 print(f"[Calibrator] 触发校准...")
@@ -452,12 +471,12 @@ class DeskAgent:
                     # 处理校准结果中的计划更新
                     plan_updated = self._process_calibration_result(calibration_result)
                     if plan_updated:
-                        # 更新 Planner prompt 中的系统提示
-                        new_system_prompt = build_planner_prompt(
-                            task=task,
+                        # 更新 Planner prompt 中的系统提示（使用最新的 info_table 和复用的 PromptBuilder）
+                        new_system_prompt = self._prompt_builder.build_system_message(
                             global_info=info_table,
+                            execution_plan=self._execution_plan.format() if self._execution_plan else "",
                             history=self._history.format(),
-                            execution_plan=self._execution_plan.format() if self._execution_plan else ""
+                            instruction=task
                         )
                         messages[0]["content"] = new_system_prompt
                     # 注入校准结果到上下文
@@ -563,24 +582,32 @@ class DeskAgent:
     def _process_calibration_result(self, calibration_result: str) -> bool:
         """处理校准结果，返回是否有计划更新
         
+        使用正则表达式替代简单字符串匹配，增强对格式变体的容错：
+        - 支持中英文冒号（: / ：）
+        - 支持多种空格格式
+        - 正确解析多位数字的步骤编号（如 "10.", "11."）
+        
         Args:
             calibration_result: 校准结果文本
         
         Returns:
             是否有计划更新
         """
-        # 检查是否有更新计划的指示
-        if "更新计划: 是" in calibration_result:
-            # 尝试提取新计划
-            new_plan_match = re.search(r'新计划:\s*(.+)', calibration_result)
+        # 检查是否有更新计划的指示（支持中英文冒号）
+        if re.search(r'更新计划\s*[:：]\s*是', calibration_result):
+            # 尝试提取新计划（支持中英文冒号，处理多位数字步骤）
+            new_plan_match = re.search(r'新计划\s*[:：]\s*(.*?)(?:\n\s*\n|\Z)', calibration_result, re.DOTALL)
             if new_plan_match:
                 new_plan_text = new_plan_match.group(1).strip()
-                # 解析新计划步骤
+                # 解析新计划步骤：使用正则正确解析数字步骤
                 new_steps = []
                 for line in new_plan_text.split('\n'):
-                    line = line.strip().lstrip('1.').lstrip('2.').lstrip('3.').strip()
-                    if line:
-                        new_steps.append(line)
+                    # 使用正则匹配步骤编号：支持 "1.", "10.", "1)", "10)", "1、" 等格式
+                    line_match = re.match(r'^\s*(?:\d+[.\)]\s*|[一二三四五六七八九十]+[、.]\s*)?(.+)', line)
+                    if line_match:
+                        step_text = line_match.group(1).strip()
+                        if step_text:
+                            new_steps.append(step_text)
                 
                 if new_steps:
                     if self._execution_plan:
@@ -851,19 +878,28 @@ class DeskAgent:
             return ""
     
     def _trim_messages(self, messages: list) -> list:
-        """滑动窗口：保留 system + 最近 N 轮对话"""
+        """滑动窗口：保留 system + 最近 N 轮完整对话
+        
+        每轮对话包含 user + assistant 两条消息。裁剪时确保不拆散对话对。
+        """
         if len(messages) <= 1:
             return messages
         
         system_msg = messages[0]
-        keep_count = self.context_window_size * 2
-        recent_messages = messages[1:]
+        conversation_msgs = messages[1:]
+        keep_count = self.context_window_size * 2  # 保留 N 轮对话
+        keep_pairs = self.context_window_size  # 保留 N 轮完整对话
         
-        if len(recent_messages) > keep_count:
-            recent_messages = recent_messages[-keep_count:]
-            print(f"[Context] 裁剪到最近 {self.context_window_size} 轮对话")
+        if len(conversation_msgs) <= keep_count:
+            return messages
         
-        return [system_msg] + recent_messages
+        # 确保从 user 消息开始裁剪（不拆散对话对）
+        # 每轮对话 = user + assistant = 2 条消息
+        conversation_msgs = conversation_msgs[-keep_pairs * 2:]
+        
+        print(f"[Context] 裁剪到最近 {keep_pairs} 轮对话（{len(conversation_msgs)} 条消息）")
+        
+        return [system_msg] + conversation_msgs
     
     def _build_result(self, success: bool, message: str, steps: int) -> dict:
         """构建返回结果"""
@@ -944,23 +980,9 @@ class DeskAgent:
                 print("[验证] 无障碍树无变化")
                 return (False, "无障碍树无变化，操作可能未生效", timer.stop())
             
-            # 构建差异摘要
-            diff_summary = []
-            if diff_result.window_changes:
-                diff_summary.append("窗口变化:")
-                diff_summary.extend([f"  - {c}" for c in diff_result.window_changes[:5]])
-            if diff_result.focus_changes:
-                diff_summary.append("焦点变化:")
-                diff_summary.extend([f"  - {c}" for c in diff_result.focus_changes[:3]])
-            if diff_result.dialog_changes:
-                diff_summary.append("弹窗变化:")
-                diff_summary.extend([f"  - {c}" for c in diff_result.dialog_changes[:3]])
-            if diff_result.element_changes:
-                diff_summary.append("元素变化:")
-                diff_summary.extend([f"  - {c}" for c in diff_result.element_changes[:5]])
-            
-            diff_text = "\n".join(diff_summary)
-            print(f"[验证] 差异摘要:\n{diff_text[:500]}")
+            # 使用新的 format_for_llm() 生成带上下文的差异摘要
+            diff_text = diff_result.format_for_llm(max_items=15)
+            print(f"[验证] 差异摘要:\n{diff_text[:800]}")
             
             # 调用 LLM 分析差异
             verification_prompt_text = build_accessibility_verification_prompt(

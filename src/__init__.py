@@ -3,7 +3,6 @@
 __version__ = "1.2.0"
 
 # 核心组件
-from .agentdesk_client import AgentDeskClient
 from .agent_loop import DeskAgent, ExecutionHistory
 from .action_executor import ActionExecutor, KeyMapper
 from .config import Config, get_config
@@ -29,7 +28,6 @@ from .metrics import RunMetrics, StepMetric, MetricsTimer
 
 __all__ = [
     # 核心组件
-    "AgentDeskClient",
     "DeskAgent",
     "ActionExecutor",
     "KeyMapper",

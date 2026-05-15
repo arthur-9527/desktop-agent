@@ -273,7 +273,12 @@ class ActionExecutor:
                 direction = "left"
             elif "right" in output.lower():
                 direction = "right"
-            return {"action_type": "scroll", "action_inputs": {"direction": direction}}
+            result = {"action_type": "scroll", "action_inputs": {"direction": direction}}
+            # 可选：尝试提取坐标（如果有则先移动鼠标到该位置再滚动）
+            coords = self._extract_point(output)
+            if coords:
+                result["action_inputs"]["start_box"] = str(list(coords))
+            return result
 
         # check_input 动作
         if "check_input" in output.lower():
@@ -383,6 +388,12 @@ class ActionExecutor:
             await self.client.mouse_up()
 
         elif action_type == "scroll":
+            # 如果有坐标，先移动到该位置再滚动
+            start_box = inputs.get("start_box")
+            if start_box:
+                x, y = self._get_coords({"start_box": start_box})
+                await self.client.mouse_move(x=int(x), y=int(y))
+                await asyncio.sleep(0.1)
             await self.client.mouse_scroll(
                 direction=inputs.get("direction", "down"),
                 amount=1,

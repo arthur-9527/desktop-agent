@@ -1,7 +1,7 @@
 """无障碍树解析器 - 生成全局动态信息表"""
 
 import platform
-from typing import Optional, List
+from typing import Optional, List, Dict
 from dataclasses import dataclass, field
 
 
@@ -498,41 +498,122 @@ class AccessibilityParser:
 
 
 @dataclass
+class ElementChange:
+    """单条元素变更记录（带上下文）"""
+    change_type: str           # "added" / "removed" / "modified"
+    element_path: str          # 完整路径 "Desktop > Window:X > Edit:Y"
+    element_role: str          # "Edit", "CheckBox" 等
+    element_name: str          # 元素名称
+    details: str               # 具体变化描述，如 "value: '' → 'hello'"
+    parent_info: str = ""      # 父节点 "Pane '文本编辑区'"
+    sibling_info: str = ""     # 兄弟摘要 "Button:保存, Button:另存为"
+    child_info: str = ""       # 子级摘要（仅新增容器类）
+    
+    def to_string(self) -> str:
+        """格式化为可读字符串"""
+        parts = [f"[{self.change_type}] {self.element_role} '{self.element_name}' {self.details}"]
+        parts.append(f"  路径: {self.element_path}")
+        if self.parent_info:
+            parts.append(f"  父级: {self.parent_info}")
+        if self.sibling_info:
+            parts.append(f"  同级: {self.sibling_info}")
+        if self.child_info:
+            parts.append(f"  子级: {self.child_info}")
+        return "\n".join(parts)
+
+
+@dataclass
 class DiffResult:
-    """树对比结果"""
-    changed: bool = False                          # 是否有变化
-    window_changes: List[str] = field(default_factory=list)      # 窗口变化
-    focus_changes: List[str] = field(default_factory=list)       # 焦点变化
-    dialog_changes: List[str] = field(default_factory=list)      # 弹窗/对话框变化
-    element_changes: List[str] = field(default_factory=list)     # 元素属性变化
+    """树对比结果（全面比较）"""
+    changed: bool = False
+    changes: List[ElementChange] = field(default_factory=list)
+    
+    # 向后兼容的分组属性
+    @property
+    def window_changes(self) -> List[str]:
+        """兼容旧代码：返回窗口相关变更"""
+        return [c.to_string() for c in self.changes 
+                if c.element_role == "Window" or "Window:" in c.element_path]
+    
+    @property
+    def focus_changes(self) -> List[str]:
+        """兼容旧代码：返回焦点相关变更"""
+        return [c.to_string() for c in self.changes 
+                if "focus" in c.details.lower() or "focused" in c.details.lower()]
+    
+    @property
+    def dialog_changes(self) -> List[str]:
+        """兼容旧代码：返回弹窗相关变更"""
+        return [c.to_string() for c in self.changes 
+                if c.element_role in {"Dialog", "Alert"}]
+    
+    @property
+    def element_changes(self) -> List[str]:
+        """兼容旧代码：返回所有元素变更"""
+        return [c.to_string() for c in self.changes 
+                if c.element_role not in {"Window", "Dialog", "Alert"}]
     
     def summary(self) -> str:
         """生成变化摘要"""
-        if not self.changed:
+        if not self.changed or not self.changes:
             return "无变化"
         
         parts = []
-        if self.window_changes:
-            parts.append(f"窗口: {', '.join(self.window_changes[:3])}")
-        if self.focus_changes:
-            parts.append(f"焦点: {', '.join(self.focus_changes[:3])}")
-        if self.dialog_changes:
-            parts.append(f"弹窗: {', '.join(self.dialog_changes[:3])}")
-        if self.element_changes:
-            parts.append(f"元素: {', '.join(self.element_changes[:3])}")
+        if self.changes:
+            parts.append(f"共 {len(self.changes)} 处变更")
+            # 按类型统计
+            added = sum(1 for c in self.changes if c.change_type == "added")
+            removed = sum(1 for c in self.changes if c.change_type == "removed")
+            modified = sum(1 for c in self.changes if c.change_type == "modified")
+            stats = []
+            if added: stats.append(f"新增 {added}")
+            if removed: stats.append(f"删除 {removed}")
+            if modified: stats.append(f"修改 {modified}")
+            if stats:
+                parts.append(f"({' | '.join(stats)})")
         
         return "; ".join(parts) if parts else "有变化"
+    
+    def format_for_llm(self, max_items: int = 10) -> str:
+        """格式化为 LLM 友好的逐条变更列表
+        
+        Args:
+            max_items: 最多显示的变更条数
+            
+        Returns:
+            格式化的变更描述文本
+        """
+        if not self.changed or not self.changes:
+            return "界面无变化"
+        
+        lines = [f"界面变化检测（共 {len(self.changes)} 处变更）:"]
+        lines.append("")
+        
+        for i, change in enumerate(self.changes[:max_items], 1):
+            lines.append(f"{i}. {change.to_string()}")
+            lines.append("")
+        
+        if len(self.changes) > max_items:
+            lines.append(f"... 还有 {len(self.changes) - max_items} 处变更未显示")
+        
+        return "\n".join(lines)
 
 
-def diff_trees(before: dict, after: dict) -> DiffResult:
-    """对比两份无障碍树，检测变化
+def diff_trees(before: dict, after: dict, max_depth: int = 15) -> DiffResult:
+    """对比两份无障碍树，检测变化（全面比较）
+    
+    使用路径匹配逐元素对比，检测：
+    - 新增/删除的元素
+    - 属性变化（name, value, bounds, state）
+    - 带上下文信息（父级、兄弟、子级）
     
     纯代码执行，不调用 LLM。
     
     Args:
         before: 操作前的无障碍树 {"tree": {...}}
         after: 操作后的无障碍树 {"tree": {...}}
-    
+        max_depth: 最大遍历深度
+        
     Returns:
         DiffResult 变化检测结果
     """
@@ -544,67 +625,280 @@ def diff_trees(before: dict, after: dict) -> DiffResult:
     if not before_root or not after_root:
         return result
     
-    # 1. 提取窗口列表
-    before_windows = _extract_windows(before_root)
-    after_windows = _extract_windows(after_root)
+    # 提取两棵树的完整元素映射（路径 -> 节点）
+    before_elements = _extract_elements_with_path(before_root, max_depth)
+    after_elements = _extract_elements_with_path(after_root, max_depth)
     
-    # 2. 检测窗口变化
-    before_names = {w["name"] for w in before_windows if w.get("name")}
-    after_names = {w["name"] for w in after_windows if w.get("name")}
+    # 获取所有路径集合
+    before_paths = set(before_elements.keys())
+    after_paths = set(after_elements.keys())
     
-    # 新窗口出现
-    new_windows = after_names - before_names
-    for name in new_windows:
-        result.window_changes.append(f"新窗口 '{name}'")
+    # 1. 检测新增元素
+    added_paths = after_paths - before_paths
+    for path in sorted(added_paths):
+        node = after_elements[path]
+        change = _create_element_change(
+            change_type="added",
+            path=path,
+            node=node,
+            context=_get_context_info(path, after_elements)
+        )
+        result.changes.append(change)
     
-    # 窗口关闭
-    closed_windows = before_names - after_names
-    for name in closed_windows:
-        result.window_changes.append(f"窗口关闭 '{name}'")
+    # 2. 检测删除元素
+    removed_paths = before_paths - after_paths
+    for path in sorted(removed_paths):
+        node = before_elements[path]
+        change = _create_element_change(
+            change_type="removed",
+            path=path,
+            node=node,
+            context=_get_context_info(path, before_elements)
+        )
+        result.changes.append(change)
     
-    # 3. 检测弹窗/对话框变化
-    before_dialogs = _find_elements_by_role(before_root, {"Dialog", "Alert"})
-    after_dialogs = _find_elements_by_role(after_root, {"Dialog", "Alert"})
+    # 3. 检测修改的元素（路径相同但属性不同）
+    common_paths = before_paths & after_paths
+    for path in sorted(common_paths):
+        before_node = before_elements[path]
+        after_node = after_elements[path]
+        
+        changes = _compare_node_properties(before_node, after_node)
+        if changes:
+            context = _get_context_info(path, after_elements)
+            for change_detail in changes:
+                result.changes.append(ElementChange(
+                    change_type="modified",
+                    element_path=path,
+                    element_role=after_node.get("role", "Unknown"),
+                    element_name=after_node.get("name", ""),
+                    details=change_detail,
+                    parent_info=context.get("parent", ""),
+                    sibling_info=context.get("siblings", ""),
+                    child_info=""  # 修改不显示子级（避免信息过载）
+                ))
     
-    if len(after_dialogs) > len(before_dialogs):
-        for dlg in after_dialogs[len(before_dialogs):]:
-            name = dlg.get("name", "未命名")
-            result.dialog_changes.append(f"新弹窗 '{name}'")
-    elif len(after_dialogs) < len(before_dialogs):
-        result.dialog_changes.append("弹窗已关闭")
-    
-    # 4. 检测焦点变化（通过聚焦窗口判断）
-    before_focused = next((w for w in before_windows if w.get("is_focused")), None)
-    after_focused = next((w for w in after_windows if w.get("is_focused")), None)
-    
-    if before_focused and after_focused:
-        if before_focused.get("name") != after_focused.get("name"):
-            result.focus_changes.append(
-                f"焦点从 '{before_focused.get('name')}' 转移到 '{after_focused.get('name')}'"
-            )
-    
-    # 5. 检测关键元素变化（按钮、输入框等）
-    before_buttons = _find_elements_by_role(before_root, {"Button"})
-    after_buttons = _find_elements_by_role(after_root, {"Button"})
-    
-    # 检测按钮文本变化
-    before_btn_texts = {b.get("name", "") for b in before_buttons}
-    after_btn_texts = {b.get("name", "") for b in after_buttons}
-    
-    new_btns = after_btn_texts - before_btn_texts
-    for btn_text in list(new_btns)[:5]:  # 最多记录5个
-        if btn_text:
-            result.element_changes.append(f"新按钮 '{btn_text}'")
-    
-    # 判断是否有变化
-    result.changed = bool(
-        result.window_changes or 
-        result.focus_changes or 
-        result.dialog_changes or 
-        result.element_changes
-    )
+    # 判断是否发生变化
+    result.changed = len(result.changes) > 0
     
     return result
+
+
+def _extract_elements_with_path(root: dict, max_depth: int = 15) -> Dict[str, dict]:
+    """提取所有元素及其路径
+    
+    Args:
+        root: 树根节点
+        max_depth: 最大遍历深度
+        
+    Returns:
+        路径到节点的映射字典
+    """
+    result = {}
+    
+    def walk(node, parent_path: str = "Desktop", depth: int = 0):
+        if not node or depth > max_depth:
+            return
+        
+        role = node.get("role", "Unknown")
+        name = node.get("name", "")
+        # 构建路径签名（包含 role 和 name 用于唯一标识）
+        path_segment = f"{role}:{name}" if name else role
+        current_path = f"{parent_path} > {path_segment}" if parent_path else path_segment
+        
+        # 存储节点（包含路径信息便于上下文提取）
+        result[current_path] = node
+        
+        # 递归处理子节点
+        for child in node.get("children", []):
+            walk(child, current_path, depth + 1)
+    
+    walk(root)
+    return result
+
+
+def _get_context_info(path: str, elements: Dict[str, dict]) -> Dict[str, str]:
+    """获取元素的上下文信息（父级、兄弟、子级）
+    
+    Args:
+        path: 元素完整路径
+        elements: 所有元素映射
+        
+    Returns:
+        包含 parent, siblings, children 的字典
+    """
+    context = {"parent": "", "siblings": "", "children": ""}
+    
+    # 解析路径获取父路径
+    parts = path.split(" > ")
+    if len(parts) < 2:
+        return context
+    
+    current_role_name = parts[-1]
+    current_role = current_role_name.split(":")[0]
+    parent_path = " > ".join(parts[:-1])
+    
+    # 获取父级信息
+    if parent_path in elements:
+        parent_node = elements[parent_path]
+        parent_role = parent_node.get("role", "Unknown")
+        parent_name = parent_node.get("name", "")
+        context["parent"] = f"{parent_role} '{parent_name}'" if parent_name else parent_role
+    
+    # 获取兄弟信息（同父的其他子节点）
+    sibling_parts = []
+    for p, node in elements.items():
+        if p.startswith(parent_path + " > ") and p != path:
+            # 这是父节点的直接子节点
+            relative = p[len(parent_path + " > "):]
+            if " > " not in relative:  # 直接子节点
+                role = node.get("role", "Unknown")
+                name = node.get("name", "")
+                if name:
+                    sibling_parts.append(f"{role}:{name}")
+                else:
+                    sibling_parts.append(role)
+    
+    # 限制兄弟数量，避免信息过载
+    if sibling_parts:
+        if len(sibling_parts) > 5:
+            context["siblings"] = ", ".join(sibling_parts[:5]) + f" ...等{sibling_parts[5:]}个"
+        else:
+            context["siblings"] = ", ".join(sibling_parts)
+    
+    # 获取子级信息（仅对新增的元素）
+    if path in elements:
+        current_node = elements[path]
+        child_parts = []
+        for child in current_node.get("children", [])[:3]:  # 最多3个子级
+            child_role = child.get("role", "Unknown")
+            child_name = child.get("name", "")
+            if child_name:
+                child_parts.append(f"{child_role}:{child_name}")
+            else:
+                child_parts.append(child_role)
+        
+        if child_parts:
+            context["children"] = ", ".join(child_parts)
+            remaining = len(current_node.get("children", [])) - 3
+            if remaining > 0:
+                context["children"] += f" ...等{remaining}个子元素"
+    
+    return context
+
+
+def _create_element_change(
+    change_type: str,
+    path: str,
+    node: dict,
+    context: Dict[str, str]
+) -> ElementChange:
+    """创建 ElementChange 对象
+    
+    Args:
+        change_type: 变更类型
+        path: 元素路径
+        node: 节点数据
+        context: 上下文信息
+        
+    Returns:
+        ElementChange 对象
+    """
+    role = node.get("role", "Unknown")
+    name = node.get("name", "")
+    
+    # 构建详情描述
+    if change_type == "added":
+        details = f"bounds: {node.get('bounds', {})}"
+    elif change_type == "removed":
+        details = "元素已删除"
+    else:
+        details = ""
+    
+    return ElementChange(
+        change_type=change_type,
+        element_path=path,
+        element_role=role,
+        element_name=name,
+        details=details,
+        parent_info=context.get("parent", ""),
+        sibling_info=context.get("siblings", ""),
+        child_info=context.get("children", "") if change_type == "added" else ""
+    )
+
+
+def _compare_node_properties(before: dict, after: dict) -> List[str]:
+    """比较两个节点的属性，返回变化详情列表
+    
+    Args:
+        before: 操作前节点
+        after: 操作后节点
+        
+    Returns:
+        变化描述列表，无变化返回空列表
+    """
+    changes = []
+    
+    # 1. 比较 name
+    before_name = before.get("name", "")
+    after_name = after.get("name", "")
+    if before_name != after_name:
+        changes.append(f'name: "{before_name}" → "{after_name}"')
+    
+    # 2. 比较 value（输入框、复选框等）
+    before_value = before.get("value", "")
+    after_value = after.get("value", "")
+    if before_value != after_value:
+        # 截断过长的值
+        b_val = str(before_value)[:30] + "..." if len(str(before_value)) > 30 else str(before_value)
+        a_val = str(after_value)[:30] + "..." if len(str(after_value)) > 30 else str(after_value)
+        changes.append(f'value: "{b_val}" → "{a_val}"')
+    
+    # 3. 比较 bounds（位置/大小）
+    before_bounds = before.get("bounds", {})
+    after_bounds = after.get("bounds", {})
+    if before_bounds != after_bounds:
+        # 只记录有意义的变化（位置或大小变化超过5像素）
+        b_x = before_bounds.get("x", 0)
+        b_y = before_bounds.get("y", 0)
+        b_w = before_bounds.get("width", 0)
+        b_h = before_bounds.get("height", 0)
+        a_x = after_bounds.get("x", 0)
+        a_y = after_bounds.get("y", 0)
+        a_w = after_bounds.get("width", 0)
+        a_h = after_bounds.get("height", 0)
+        
+        # 判断是否为窗口移动/缩放
+        if abs(a_x - b_x) > 5 or abs(a_y - b_y) > 5:
+            changes.append(f"position: ({b_x},{b_y}) → ({a_x},{a_y})")
+        if abs(a_w - b_w) > 5 or abs(a_h - b_h) > 5:
+            changes.append(f"size: {b_w}x{b_h} → {a_w}x{a_h}")
+    
+    # 4. 比较 state（状态字段）
+    before_state = before.get("state", {})
+    after_state = after.get("state", {})
+    if isinstance(before_state, dict) and isinstance(after_state, dict):
+        # 提取关键状态
+        state_keys = ["checked", "enabled", "focused", "selected", "expanded", "collapsed"]
+        for key in state_keys:
+            b_val = before_state.get(key)
+            a_val = after_state.get(key)
+            if b_val != a_val and (b_val is not None or a_val is not None):
+                changes.append(f"state.{key}: {b_val} → {a_val}")
+    
+    # 5. 比较 description（描述文本）
+    before_desc = before.get("description", "")
+    after_desc = after.get("description", "")
+    if before_desc != after_desc:
+        changes.append(f'description: "{before_desc}" → "{after_desc}"')
+    
+    # 6. 比较 accessibility_id（用于追踪元素唯一性）
+    before_id = before.get("accessibility_id", "")
+    after_id = after.get("accessibility_id", "")
+    if before_id != after_id and (before_id or after_id):
+        changes.append(f"id: {before_id} → {after_id}")
+    
+    return changes
 
 
 def _extract_windows(root: dict) -> List[dict]:
