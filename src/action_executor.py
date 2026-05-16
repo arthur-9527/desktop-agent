@@ -286,14 +286,16 @@ class ActionExecutor:
 
         # type 动作
         if "type" in output.lower():
-            # 匹配 content 和可选的 mode 参数
+            # 匹配 content 和可选的 mode、press_enter 参数
             content_match = re.search(r"content\s*=\s*['\"](.+?)['\"]", output, re.IGNORECASE | re.DOTALL)
             mode_match = re.search(r"mode\s*=\s*['\"](\w+)['\"]", output, re.IGNORECASE)
+            press_enter_match = re.search(r"press_enter\s*=\s*(true|false)", output, re.IGNORECASE)
             
             if content_match:
                 content = content_match.group(1)
                 mode = mode_match.group(1) if mode_match else "replace"
-                return {"action_type": "type", "action_inputs": {"content": content, "mode": mode}}
+                press_enter = press_enter_match.group(1).lower() == "true" if press_enter_match else False
+                return {"action_type": "type", "action_inputs": {"content": content, "mode": mode, "press_enter": press_enter}}
 
         # hotkey 动作
         if "hotkey" in output.lower():
@@ -410,7 +412,8 @@ class ActionExecutor:
             # 智能输入：处理输入法和输入模式
             content = inputs.get("content", "")
             mode = inputs.get("mode", "replace")  # replace 或 append
-            await self._smart_type(content, mode, ime_status)
+            press_enter = inputs.get("press_enter", False)  # 是否按回车
+            await self._smart_type(content, mode, ime_status, press_enter)
 
         elif action_type == "hotkey":
             # 使用 KeyMapper 转换按键名称
@@ -543,13 +546,14 @@ class ActionExecutor:
         except Exception as e:
             return f"无法获取输入框内容: {e}"
     
-    async def _smart_type(self, content: str, mode: str = "replace", ime_status: str = ""):
+    async def _smart_type(self, content: str, mode: str = "replace", ime_status: str = "", press_enter: bool = False):
         """智能输入：自动处理输入法和输入模式
         
         Args:
             content: 要输入的内容
             mode: 输入模式，"replace" 替换，"append" 追加
             ime_status: 当前输入法状态（从全局状态表获取）
+            press_enter: 输入完成后是否按回车
         """
         # 1. 判断内容类型
         is_english_content = content.isascii()
@@ -593,6 +597,12 @@ class ActionExecutor:
         actual_wait = len(content) * 0.5
         print(f"[SmartType] 等待输入完成: {actual_wait:.1f}s (内容长度={len(content)})")
         await asyncio.sleep(actual_wait)
+        
+        # 6. 如果 press_enter=true，在输入完成后按回车
+        if press_enter:
+            print(f"[SmartType] 输入完成后按回车")
+            await self.client.keyboard_hotkey("Enter")
+            await asyncio.sleep(0.2)  # 等待回车生效
     
     def get_last_input_check_result(self) -> str:
         """获取最近的输入框检查结果"""

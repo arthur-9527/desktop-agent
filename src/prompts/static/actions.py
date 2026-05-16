@@ -17,7 +17,7 @@ AVAILABLE_ACTIONS = """## 可用动作
 | 动作 | 格式 | 说明 |
 |------|------|------|
 | hotkey | `hotkey(key='ctrl c')` | 快捷键，按键用空格分隔 |
-| type | `type(content='xxx', mode='replace')` | 输入文本，mode: replace/append |
+| type | `type(content='xxx', mode='replace', press_enter=false)` | 输入文本，mode: replace/append，press_enter: 输入完成后是否按回车 |
 | check_input | `check_input()` | 检查当前焦点输入框内容 |
 
 ### 系统动作
