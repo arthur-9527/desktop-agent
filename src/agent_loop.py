@@ -16,6 +16,7 @@ from .desktoptools import DesktopClient
 from .action_executor import ActionExecutor
 from .accessibility_parser import (
     create_info_table,
+    create_focused_element_table,
     AccessibilityParser,
     GlobalInfo,
     diff_trees,
@@ -163,8 +164,18 @@ class DeskAgent:
         raw_tree_before = await self._get_accessibility_tree()
         info_table = await self._get_info_table_from_tree(raw_tree_before)
         
+        # 获取聚焦元素
+        focused_element = None
+        try:
+            focused_element = await self.client.accessibility_focused()
+        except Exception as e:
+            print(f"[聚焦元素] 获取失败: {e}")
+        
+        # 格式化聚焦元素信息
+        focused_info = create_focused_element_table(focused_element)
+        
         # 获取操作系统类型
-        self.global_info = self._accessibility_parser.parse(raw_tree_before, None, None)
+        self.global_info = self._accessibility_parser.parse(raw_tree_before, None, focused_element)
         os_type = self.global_info.os if self.global_info else "Windows"
         print(f"[全局信息] 操作系统: {os_type}")
         
@@ -177,6 +188,7 @@ class DeskAgent:
         # 构建 Planner system prompt
         system_prompt = self._prompt_builder.build_system_message(
             global_info=info_table,
+            focused_info=focused_info,
             execution_plan="",
             history="",
             instruction=task

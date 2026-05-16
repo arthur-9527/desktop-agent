@@ -67,6 +67,7 @@ class PromptBuilder:
     def build_system_message(
         self,
         global_info: str = "",
+        focused_info: str = "",
         execution_plan: str = "",
         history: str = "",
         instruction: str = "",
@@ -75,6 +76,7 @@ class PromptBuilder:
         
         Args:
             global_info: 全局信息表
+            focused_info: 当前聚焦元素信息
             execution_plan: 执行计划
             history: 执行历史
             instruction: 用户任务
@@ -90,6 +92,11 @@ class PromptBuilder:
         
         if global_info:
             dynamic_parts.append(f"## 全局信息表\n\n{global_info}")
+        
+        if focused_info:
+            dynamic_parts.append(f"## 当前聚焦元素\n\n{focused_info}")
+        else:
+            dynamic_parts.append("## 当前聚焦元素\n\n（暂无聚焦元素信息）")
         
         if execution_plan:
             dynamic_parts.append(f"## 当前执行计划\n\n{execution_plan}")

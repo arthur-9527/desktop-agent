@@ -454,7 +454,7 @@ class AccessibilityParser:
             lines.append("### 桌面图标")
             lines.append("| 名称 | 坐标 |")
             lines.append("|------|------|")
-            for icon in info.desktop_icons[:20]:  # 最多 20 个
+            for icon in info.desktop_icons:  # 不限制数量
                 lines.append(f"| {icon.name} | ({icon.normalized_x}, {icon.normalized_y}) |")
             lines.append("")
 
@@ -463,7 +463,7 @@ class AccessibilityParser:
             lines.append("### 任务栏")
             lines.append("| 按钮 | 坐标 |")
             lines.append("|------|------|")
-            for item in info.taskbar_items[:15]:
+            for item in info.taskbar_items:  # 不限制数量
                 lines.append(f"| {item.name} | ({item.normalized_x}, {item.normalized_y}) |")
             lines.append("")
 
@@ -472,7 +472,7 @@ class AccessibilityParser:
             lines.append("### 系统托盘")
             lines.append("| 应用 | 坐标 | 状态 |")
             lines.append("|------|------|------|")
-            for item in info.tray_items[:10]:
+            for item in info.tray_items:  # 不限制数量
                 status = item.extra or "-"
                 lines.append(f"| {item.name} | ({item.normalized_x}, {item.normalized_y}) | {status} |")
             lines.append("")
@@ -499,15 +499,52 @@ class AccessibilityParser:
                     
                     if text_items:
                         lines.append(f"文本信息 ({len(text_items)}个):")
-                        for child in text_items[:10]:  # 每个窗口最多 10 个
+                        for child in text_items:  # 不限制数量
                             lines.append(f"  - [Text] {child.name} ({child.normalized_x}, {child.normalized_y})")
                     
                     if other_items:
                         lines.append(f"关键元素 ({len(other_items)}个):")
-                        for child in other_items[:10]:  # 每个窗口最多 10 个
+                        for child in other_items:  # 不限制数量
                             lines.append(f"  - [{child.role}] {child.name} ({child.normalized_x}, {child.normalized_y})")
                 lines.append("")
 
+        return "\n".join(lines)
+
+    def format_focused_element(self, focused_element: Optional[dict]) -> str:
+        """格式化当前聚焦元素信息
+        
+        Args:
+            focused_element: 聚焦元素数据 {"element": {...}}
+        
+        Returns:
+            格式化的聚焦元素文本
+        """
+        if not focused_element:
+            return "## 当前聚焦元素\n\n> 这是当前键盘焦点所在的元素，表示用户当前正在交互的位置。\n> 判断系统聚焦状态时请以此项为准，需与全局信息表中的聚焦窗口状态合并分析。\n\n（无聚焦元素信息）"
+        
+        elem = focused_element.get("element", {})
+        if not elem:
+            return "## 当前聚焦元素\n\n> 这是当前键盘焦点所在的元素，表示用户当前正在交互的位置。\n> 判断系统聚焦状态时请以此项为准，需与全局信息表中的聚焦窗口状态合并分析。\n\n（无聚焦元素信息）"
+        
+        role = elem.get("role", "Unknown")
+        name = elem.get("name", "")
+        bounds = elem.get("bounds", {})
+        
+        # 计算归一化坐标
+        nx, ny = self._normalize_bounds(bounds) if bounds else (0, 0)
+        
+        lines = [
+            "## 当前聚焦元素",
+            "",
+            "> 这是当前键盘焦点所在的元素，表示用户当前正在交互的位置。",
+            "> 判断系统聚焦状态时请以此项为准，需与全局信息表中的聚焦窗口状态合并分析。",
+            ""
+        ]
+        lines.append(f"- 角色: {role}")
+        if name:
+            lines.append(f"- 名称: {name}")
+        lines.append(f"- 坐标: ({nx}, {ny}) [归一化坐标]")
+        
         return "\n".join(lines)
 
 
@@ -1075,3 +1112,18 @@ def create_info_table(
     parser = AccessibilityParser()
     info = parser.parse(tree, mouse_pos, focused_element)
     return parser.format_info_table(info)
+
+
+def create_focused_element_table(
+    focused_element: Optional[dict] = None
+) -> str:
+    """创建聚焦元素信息表（便捷函数）
+
+    Args:
+        focused_element: 焦点元素 {"element": {...}}
+
+    Returns:
+        格式化的聚焦元素文本
+    """
+    parser = AccessibilityParser()
+    return parser.format_focused_element(focused_element)
