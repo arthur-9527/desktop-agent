@@ -29,8 +29,6 @@ class Config:
     calibration_base_url: str = os.getenv("CALIBRATION_BASE_URL", "")  # 空则复用 llm_base_url
     calibration_api_key: str = os.getenv("CALIBRATION_API_KEY", "")    # 空则复用 llm_api_key
     calibration_model: str = os.getenv("CALIBRATION_MODEL", "")        # 空则复用 general_model
-    calibration_interval: int = int(os.getenv("CALIBRATION_INTERVAL", "5"))  # 每 N 步校准一次，0 表示关闭
-
     # 执行参数
     max_iterations: int = int(os.getenv("MAX_ITERATIONS", "25"))
     loop_interval_ms: int = int(os.getenv("LOOP_INTERVAL_MS", "500"))

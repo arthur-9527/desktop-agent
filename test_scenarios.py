@@ -27,7 +27,6 @@ def mock_config():
     config = MagicMock(spec=Config)
     config.max_iterations = 10
     config.context_window_size = 5
-    config.calibration_interval = 0  # 关闭校准以便测试
     config.debug = False
     config.general_model = "test-model"
     config.vision_model = "test-vision-model"

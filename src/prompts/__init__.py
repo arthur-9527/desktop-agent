@@ -51,7 +51,6 @@ prompt_text = build_verification_prompt("验证保存成功")
 
 # 主要导出
 from .builder import PromptBuilder, build_planner_prompt
-from .calibrator import build_calibrator_prompt, CALIBRATOR_PROMPT
 from .vision_grounding import build_vision_grounding_prompt, VISION_GROUNDING_PROMPT
 from .verification import build_verification_prompt, build_verification_message, VERIFICATION_PROMPT
 
@@ -79,7 +78,6 @@ __all__ = [
     
     # 便捷函数
     "build_planner_prompt",
-    "build_calibrator_prompt",
     "build_vision_grounding_prompt",
     "build_verification_prompt",
     "build_verification_message",
@@ -95,7 +93,6 @@ __all__ = [
     "EXECUTION_RULES",
     "OUTPUT_FORMAT",
     "VERIFICATION_METHODS",
-    "CALIBRATOR_PROMPT",
     "VISION_GROUNDING_PROMPT",
     "VERIFICATION_PROMPT",
     

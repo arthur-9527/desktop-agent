@@ -49,13 +49,11 @@ class RunMetrics:
     # 模型调用统计
     planner_calls: int = 0
     vision_calls: int = 0
-    calibrator_calls: int = 0
     
     # 耗时统计 (毫秒)
     total_time_ms: int = 0
     planner_time_ms: int = 0
     vision_time_ms: int = 0
-    calibrator_time_ms: int = 0
     execution_time_ms: int = 0
     verification_time_ms: int = 0
     
@@ -111,7 +109,6 @@ class RunMetrics:
             "model_calls": {
                 "planner": self.planner_calls,
                 "vision": self.vision_calls,
-                "calibrator": self.calibrator_calls,
             },
             "avg_step_time_ms": self.avg_step_time_ms(),
         }
@@ -131,12 +128,10 @@ class RunMetrics:
             "模型调用:",
             f"  - Planner: {self.planner_calls} 次",
             f"  - Vision: {self.vision_calls} 次",
-            f"  - Calibrator: {self.calibrator_calls} 次",
             "",
             "耗时分布:",
             f"  - Planner: {round(self.planner_time_ms / 1000, 1)}s",
             f"  - Vision: {round(self.vision_time_ms / 1000, 1)}s",
-            f"  - Calibrator: {round(self.calibrator_time_ms / 1000, 1)}s",
             f"  - Execution: {round(self.execution_time_ms / 1000, 1)}s",
             f"  - Verification: {round(self.verification_time_ms / 1000, 1)}s",
             "",

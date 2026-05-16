@@ -25,7 +25,6 @@ from .accessibility_parser import (
 from .prompts import (
     PromptBuilder, 
     build_planner_prompt, 
-    build_calibrator_prompt,
     build_vision_grounding_prompt,
 )
 from .prompts.verification import (
@@ -132,7 +131,6 @@ class DeskAgent:
         self.config = config or Config()
         self.max_steps = self.config.max_iterations
         self.context_window_size = self.config.context_window_size
-        self.calibration_interval = self.config.calibration_interval
         self.debug = self.config.debug
         
         # 内部状态
@@ -519,31 +517,6 @@ class DeskAgent:
             # 更新 info_table 为最新状态（用于校准后的 system prompt 重建）
             info_table = await self._get_info_table_from_tree(raw_tree_after)
             
-            # ========== Step 5: 校准检查 ==========
-            if self._should_calibrate(step + 1):
-                print(f"[Calibrator] 触发校准...")
-                timer.start()
-                calibration_result = await self._run_calibration(task)
-                self._metrics.calibrator_time_ms += timer.stop()
-                if calibration_result:
-                    self._metrics.calibrator_calls += 1
-                    # 处理校准结果中的计划更新
-                    plan_updated = self._process_calibration_result(calibration_result)
-                    if plan_updated:
-                        # 更新 Planner prompt 中的系统提示（使用最新的 info_table 和复用的 PromptBuilder）
-                        new_system_prompt = self._prompt_builder.build_system_message(
-                            global_info=info_table,
-                            execution_plan=self._execution_plan.format() if self._execution_plan else "",
-                            history=self._history.format(),
-                            instruction=task
-                        )
-                        messages[0]["content"] = new_system_prompt
-                    # 注入校准结果到上下文
-                    messages.append({
-                        "role": "user",
-                        "content": f"[校准反馈]\n{calibration_result}"
-                    })
-            
             # 更新基准树
             raw_tree_before = raw_tree_after
             
@@ -637,45 +610,6 @@ class DeskAgent:
             text += f"\n\n最近的执行记录:\n{history_text}"
         
         return text
-    
-    def _process_calibration_result(self, calibration_result: str) -> bool:
-        """处理校准结果，返回是否有计划更新
-        
-        使用正则表达式替代简单字符串匹配，增强对格式变体的容错：
-        - 支持中英文冒号（: / ：）
-        - 支持多种空格格式
-        - 正确解析多位数字的步骤编号（如 "10.", "11."）
-        
-        Args:
-            calibration_result: 校准结果文本
-        
-        Returns:
-            是否有计划更新
-        """
-        # 检查是否有更新计划的指示（支持中英文冒号）
-        if re.search(r'更新计划\s*[:：]\s*是', calibration_result):
-            # 尝试提取新计划（支持中英文冒号，处理多位数字步骤）
-            new_plan_match = re.search(r'新计划\s*[:：]\s*(.*?)(?:\n\s*\n|\Z)', calibration_result, re.DOTALL)
-            if new_plan_match:
-                new_plan_text = new_plan_match.group(1).strip()
-                # 解析新计划步骤：使用正则正确解析数字步骤
-                new_steps = []
-                for line in new_plan_text.split('\n'):
-                    # 使用正则匹配步骤编号：支持 "1.", "10.", "1)", "10)", "1、" 等格式
-                    line_match = re.match(r'^\s*(?:\d+[.\)]\s*|[一二三四五六七八九十]+[、.]\s*)?(.+)', line)
-                    if line_match:
-                        step_text = line_match.group(1).strip()
-                        if step_text:
-                            new_steps.append(step_text)
-                
-                if new_steps:
-                    if self._execution_plan:
-                        self._execution_plan.update(new_steps)
-                    else:
-                        self._execution_plan = ExecutionPlan(new_steps)
-                    print(f"[Calibrator] 计划已更新: {self._execution_plan.summary()}")
-                    return True
-        return False
     
     async def _call_vision_for_grounding(
         self, 
@@ -906,45 +840,6 @@ class DeskAgent:
         normalized_y = int(pixel_y * 1000 / height)
         
         return normalized_x, normalized_y
-    
-    def _should_calibrate(self, step: int) -> bool:
-        """判断是否应该触发校准"""
-        if self.calibration_interval <= 0:
-            return False
-        return step > 1 and step % self.calibration_interval == 0
-    
-    async def _run_calibration(self, task: str) -> Optional[str]:
-        """运行校准检查"""
-        try:
-            history_summary = self._history.summary(last_n=5)
-            global_info = await self._get_global_info_table()
-            
-            # 添加执行计划信息
-            execution_plan = ""
-            if self._execution_plan:
-                execution_plan = self._execution_plan.format()
-            
-            calibrator_prompt = build_calibrator_prompt(
-                task=task,
-                history_summary=history_summary,
-                global_info=global_info,
-                execution_plan=execution_plan
-            )
-            
-            response = await self.calibrator_model.chat.completions.create(
-                model=self._get_calibration_model_name(),
-                messages=[{"role": "user", "content": calibrator_prompt}],
-                max_tokens=256,
-                temperature=0.3,
-            )
-            
-            result = response.choices[0].message.content or ""
-            print(f"[Calibrator] 结果: {result[:200]}")
-            return result
-            
-        except Exception as e:
-            print(f"[Calibrator] 调用失败: {e}")
-            return None
     
     def _get_verification_model_name(self) -> str:
         """获取验证模型名称（使用校准模型）"""

@@ -19,7 +19,6 @@ from .accessibility_parser import (
 # Prompts
 from .prompts import (
     build_planner_prompt,
-    build_calibrator_prompt,
     build_vision_prompt
 )
 
@@ -42,7 +41,6 @@ __all__ = [
     "DiffResult",
     # Prompts
     "build_planner_prompt",
-    "build_calibrator_prompt",
     "build_vision_prompt",
     # Metrics
     "RunMetrics",

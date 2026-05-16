@@ -4,7 +4,6 @@
 三模型架构：
 - Planner (LLM): 主循环决策（每轮）
 - Grounding (UI-TARS): 视觉定位（按需）
-- Calibrator (LLM): 周期校准（每 N 步）
 """
 
 import asyncio
@@ -58,9 +57,6 @@ async def main():
     print("=" * 50)
     print(f"  Planner: {config.general_model}")
     print(f"  Vision:  {config.vision_model}")
-    if config.calibration_interval > 0:
-        calibration_model = config.calibration_model or config.general_model
-        print(f"  Calibrator: {calibration_model} (每 {config.calibration_interval} 步)")
     print("=" * 50)
 
     # 获取任务
@@ -103,8 +99,7 @@ async def main():
         print(f"  成功率: {metrics.get('success_rate', 'N/A')}")
         print(f"  总耗时: {metrics.get('total_time_s', 0)}s")
         print(f"  模型调用: Planner={metrics.get('model_calls', {}).get('planner', 0)}, "
-              f"Vision={metrics.get('model_calls', {}).get('vision', 0)}, "
-              f"Calibrator={metrics.get('model_calls', {}).get('calibrator', 0)}")
+              f"Vision={metrics.get('model_calls', {}).get('vision', 0)}")
 
     # 关闭连接
     await client.close()
