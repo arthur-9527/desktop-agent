@@ -6,7 +6,8 @@ EXECUTION_RULES = """## 重要规则
 ### 坐标与动作
 - 坐标格式: `<point>x y</point>`，用英文半角括号，禁止中文标点
 - 优先使用快捷键（如 `hotkey(key='ctrl s')` 保存），比鼠标操作更快更可靠
-- 任何 `type` 操作前必须先 `check_input()` 检查输入框内容，根据结果选择 replace/append
+- # 任何 `type` 操作前必须先 `check_input()` 检查输入框内容，根据结果选择 replace/append（已注释，待测试效果）
+- type 操作时，请根据任务自行决定使用 replace/append 模式
 
 ### 坐标获取
 - 优先从全局信息表查找目标元素坐标
