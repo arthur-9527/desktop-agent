@@ -49,6 +49,10 @@ class AccessibilityParser:
         "Button", "Edit", "CheckBox", "RadioButton", "ComboBox",
         "MenuItem", "TabItem", "ListItem", "Hyperlink", "Link"
     }
+    
+    # 需要提取的元素角色（包括 Text）
+    EXTRACT_ROLES = {"Button", "Edit", "CheckBox", "RadioButton", "ComboBox",
+                     "MenuItem", "TabItem", "ListItem", "Hyperlink", "Link", "Text"}
 
     # 任务栏/托盘相关关键词
     TASKBAR_KEYWORDS = ["任务栏", "Taskbar", "开始", "搜索", "文件资源管理器"]
@@ -297,7 +301,7 @@ class AccessibilityParser:
         nx, ny = self._normalize_bounds(bounds)
 
         # 提取窗口内的关键子元素（只提取可见窗口的元素）
-        children = self._extract_interactive_children(node, depth=0, max_depth=3, window_visible=is_visible)
+        children = self._extract_interactive_children(node, depth=0, max_depth=6, window_visible=is_visible)
 
         window_info = WindowInfo(
             name=name,
@@ -309,8 +313,8 @@ class AccessibilityParser:
         )
         info.windows.append(window_info)
 
-    def _extract_interactive_children(self, node: dict, depth: int = 0, max_depth: int = 3, window_visible: bool = True) -> list:
-        """提取窗口内的可交互子元素
+    def _extract_interactive_children(self, node: dict, depth: int = 0, max_depth: int = 6, window_visible: bool = True) -> list:
+        """提取窗口内的可交互子元素 + Text 元素
         
         Args:
             node: 当前节点
@@ -328,7 +332,7 @@ class AccessibilityParser:
             name = child.get("name", "")
             bounds = child.get("bounds", {})
 
-            if role in self.INTERACTIVE_ROLES and bounds and name:
+            if role in self.EXTRACT_ROLES and bounds and name:
                 # 检查元素本身是否可见（过滤负数坐标）
                 if not self._is_visible(bounds):
                     continue  # 跳过不可见/最小化的元素
@@ -489,9 +493,19 @@ class AccessibilityParser:
                 lines.append(f"#### {status} {win.name}".strip())
                 lines.append(f"状态: {visible}")
                 if win.is_visible and win.children:
-                    lines.append("关键元素:")
-                    for child in win.children[:10]:  # 每个窗口最多 10 个
-                        lines.append(f"  - [{child.role}] {child.name} ({child.normalized_x}, {child.normalized_y})")
+                    # 按角色分类：先显示 Text，再显示其他
+                    text_items = [c for c in win.children if c.role == "Text"]
+                    other_items = [c for c in win.children if c.role != "Text"]
+                    
+                    if text_items:
+                        lines.append(f"文本信息 ({len(text_items)}个):")
+                        for child in text_items[:10]:  # 每个窗口最多 10 个
+                            lines.append(f"  - [Text] {child.name} ({child.normalized_x}, {child.normalized_y})")
+                    
+                    if other_items:
+                        lines.append(f"关键元素 ({len(other_items)}个):")
+                        for child in other_items[:10]:  # 每个窗口最多 10 个
+                            lines.append(f"  - [{child.role}] {child.name} ({child.normalized_x}, {child.normalized_y})")
                 lines.append("")
 
         return "\n".join(lines)

@@ -44,19 +44,50 @@
 ### 当前窗口
 #### [聚焦] Visual Studio Code
 状态: 可见
-关键元素:
+关键元素 (4个):
   - [Button] Minimize (932, 16)
+  - [Button] Maximize (955, 16)
   - [Button] Close (977, 16)
-  - [Edit] 文件搜索 (400, 200)
 
-#### Chrome
+#### Google Chrome
 状态: 可见
-关键元素:
-  - [Button] 新建标签页 (200, 100)
+文本信息 (3个):
+  - [Text] 搜索或输入网址 (400, 50)
+  - [Text] 新建标签页 (200, 100)
+  - [Text] 书签 (600, 100)
+关键元素 (8个):
+  - [Button] 前进 (350, 50)
+  - [Button] 刷新 (380, 50)
+  - [Button] 后退 (320, 50)
+  - [Edit] 地址栏 (400, 50)
+  - [Button] 主页 (410, 50)
 
-#### [后台] 记事本
+#### [后台] 计算器
 状态: 最小化
 ```
+
+## 关键元素提取规则
+
+全局信息表通过 `_extract_interactive_children` 方法提取窗口内的关键元素，提取规则如下：
+
+1. **角色过滤**：只提取以下角色类型的元素：
+   - `Button` - 按钮
+   - `Edit` - 输入框
+   - `CheckBox` - 复选框
+   - `RadioButton` - 单选按钮
+   - `ComboBox` - 下拉框
+   - `MenuItem` - 菜单项
+   - `TabItem` - 标签项
+   - `ListItem` - 列表项
+   - `Hyperlink` - 超链接
+   - `Link` - 链接
+   - `Text` - 文本
+
+2. **可见性过滤**：只提取可见的元素（坐标不在负数区域）
+
+3. **名称过滤**：只提取有名称的元素
+
+4. **深度限制**：只提取深度 ≤ 6 的元素
 
 ## 坐标归一化规则
 
@@ -142,20 +173,20 @@ class WindowInfo:
     is_visible: bool
     normalized_x: int
     normalized_y: int
-    children: list[ElementInfo]
+    children: list = field(default_factory=list)
 
 @dataclass
 class GlobalInfo:
     """全局动态信息"""
-    os: str
-    screen_width: int
-    screen_height: int
-    mouse_x: int
-    mouse_y: int
-    desktop_icons: list[ElementInfo]
-    taskbar_items: list[ElementInfo]
-    tray_items: list[ElementInfo]
-    windows: list[WindowInfo]
+    os: str = "Unknown"
+    screen_width: int = 1920
+    screen_height: int = 1080
+    mouse_x: int = 0
+    mouse_y: int = 0
+    desktop_icons: list = field(default_factory=list)
+    taskbar_items: list = field(default_factory=list)
+    tray_items: list = field(default_factory=list)
+    windows: list = field(default_factory=list)
 ```
 
 ### 窗口可见性判断

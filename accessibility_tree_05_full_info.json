@@ -1,0 +1,569 @@
+============================================================
+=== 全局信息表（完整） ===
+============================================================
+### 当前窗口
+
+####  accessibility_tree_04.json - deskagent [SSH: 192.168.88.206] - Visual Studio Code
+状态: 可见
+窗口坐标: (-9, -9, 2578x1398)
+关键元素 (4个):
+  - [Button] Minimize (943, 14)
+  - [Button] Maximize (966, 14)
+  - [Button] Restore (966, 14)
+  - [Button] Close (988, 14)
+
+####  Google - Google Chrome
+状态: 可见
+窗口坐标: (-9, -9, 2578x1398)
+关键元素 (4个):
+  - [Button] 最小化 (944, 17)
+  - [Button] 最大化 (966, 17)
+  - [Button] 恢复 (966, 17)
+  - [Button] 关闭 (989, 17)
+
+####  计算器
+状态: 可见
+窗口坐标: (50, 40, 418x675)
+关键元素 (36个):
+  - [Button] 最小化 计算器 (123, 42)
+  - [Button] 使 计算器 最大化 (145, 42)
+  - [Button] 关闭 计算器 (168, 42)
+  - [Button] 打开导航 (34, 77)
+  - [Button] 打开历史记录浮出控件 (167, 77)
+  - [Button] 清除所有记忆 (37, 197)
+  - [Button] 记忆调用 (62, 197)
+  - [Button] 记忆加法 (88, 197)
+  - [Button] 记忆减法 (113, 197)
+  - [Button] 记忆存储 (139, 197)
+  - [Button] 打开记忆浮出控件 (165, 197)
+  - [Button] 百分比 (43, 234)
+  - [Button] 清除条目 (81, 234)
+  - [Button] 清除 (120, 234)
+  - [Button] Backspace (158, 234)
+  - [Button] 倒数 (43, 280)
+  - [Button] 平方 (81, 280)
+  - [Button] 平方根 (120, 280)
+  - [Button] 除以 (158, 280)
+  - [Button] 乘以 (158, 326)
+  - [Button] 减 (158, 371)
+  - [Button] 加 (158, 417)
+  - [Button] 等于 (158, 463)
+  - [Button] 零 (81, 464)
+  - [Button] 一 (43, 418)
+  - [Button] 二 (81, 418)
+  - [Button] 三 (120, 418)
+  - [Button] 四 (43, 372)
+  - [Button] 五 (81, 372)
+  - [Button] 六 (120, 372)
+  - [Button] 七 (43, 326)
+  - [Button] 八 (81, 326)
+  - [Button] 九 (120, 326)
+  - [Button] 十进制分隔符 (120, 464)
+  - [Button] 正负 (43, 464)
+  - [Button] 始终置顶 (79, 77)
+文本信息 (7个):
+  - [Text] 计算器 (55, 42)
+  - [Text] 表达式为 8 +  (101, 109)
+  - [Text] 显示为 88 (101, 150)
+  - [Text]  (167, 77)
+  - [Text]  (43, 464)
+  - [Text] 标准 计算器模式 (56, 75)
+  - [Text]  (79, 77)
+
+============================================================
+=== JSON 输出 ===
+============================================================
+{
+  "accessibility_tree_04.json - deskagent [SSH: 192.168.88.206] - Visual Studio Code": {
+    "visible": true,
+    "bounds": {
+      "x": -9,
+      "y": -9,
+      "width": 2578,
+      "height": 1398
+    },
+    "elements": [
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "Minimize",
+        "bounds": {
+          "x": 943,
+          "y": 14
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "Maximize",
+        "bounds": {
+          "x": 966,
+          "y": 14
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "Restore",
+        "bounds": {
+          "x": 966,
+          "y": 14
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "Close",
+        "bounds": {
+          "x": 988,
+          "y": 14
+        }
+      }
+    ]
+  },
+  "Google - Google Chrome": {
+    "visible": true,
+    "bounds": {
+      "x": -9,
+      "y": -9,
+      "width": 2578,
+      "height": 1398
+    },
+    "elements": [
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "最小化",
+        "bounds": {
+          "x": 944,
+          "y": 17
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "最大化",
+        "bounds": {
+          "x": 966,
+          "y": 17
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "恢复",
+        "bounds": {
+          "x": 966,
+          "y": 17
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "关闭",
+        "bounds": {
+          "x": 989,
+          "y": 17
+        }
+      }
+    ]
+  },
+  "计算器": {
+    "visible": true,
+    "bounds": {
+      "x": 50,
+      "y": 40,
+      "width": 418,
+      "height": 675
+    },
+    "elements": [
+      {
+        "depth": 3,
+        "role": "Button",
+        "name": "最小化 计算器",
+        "bounds": {
+          "x": 123,
+          "y": 42
+        }
+      },
+      {
+        "depth": 3,
+        "role": "Button",
+        "name": "使 计算器 最大化",
+        "bounds": {
+          "x": 145,
+          "y": 42
+        }
+      },
+      {
+        "depth": 3,
+        "role": "Button",
+        "name": "关闭 计算器",
+        "bounds": {
+          "x": 168,
+          "y": 42
+        }
+      },
+      {
+        "depth": 3,
+        "role": "Text",
+        "name": "计算器",
+        "bounds": {
+          "x": 55,
+          "y": 42
+        }
+      },
+      {
+        "depth": 4,
+        "role": "Button",
+        "name": "打开导航",
+        "bounds": {
+          "x": 34,
+          "y": 77
+        }
+      },
+      {
+        "depth": 5,
+        "role": "Text",
+        "name": "表达式为 8 + ",
+        "bounds": {
+          "x": 101,
+          "y": 109
+        }
+      },
+      {
+        "depth": 5,
+        "role": "Text",
+        "name": "显示为 88",
+        "bounds": {
+          "x": 101,
+          "y": 150
+        }
+      },
+      {
+        "depth": 5,
+        "role": "Button",
+        "name": "打开历史记录浮出控件",
+        "bounds": {
+          "x": 167,
+          "y": 77
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Text",
+        "name": "",
+        "bounds": {
+          "x": 167,
+          "y": 77
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "清除所有记忆",
+        "bounds": {
+          "x": 37,
+          "y": 197
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "记忆调用",
+        "bounds": {
+          "x": 62,
+          "y": 197
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "记忆加法",
+        "bounds": {
+          "x": 88,
+          "y": 197
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "记忆减法",
+        "bounds": {
+          "x": 113,
+          "y": 197
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "记忆存储",
+        "bounds": {
+          "x": 139,
+          "y": 197
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "打开记忆浮出控件",
+        "bounds": {
+          "x": 165,
+          "y": 197
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "百分比",
+        "bounds": {
+          "x": 43,
+          "y": 234
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "清除条目",
+        "bounds": {
+          "x": 81,
+          "y": 234
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "清除",
+        "bounds": {
+          "x": 120,
+          "y": 234
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "Backspace",
+        "bounds": {
+          "x": 158,
+          "y": 234
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "倒数",
+        "bounds": {
+          "x": 43,
+          "y": 280
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "平方",
+        "bounds": {
+          "x": 81,
+          "y": 280
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "平方根",
+        "bounds": {
+          "x": 120,
+          "y": 280
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "除以",
+        "bounds": {
+          "x": 158,
+          "y": 280
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "乘以",
+        "bounds": {
+          "x": 158,
+          "y": 326
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "减",
+        "bounds": {
+          "x": 158,
+          "y": 371
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "加",
+        "bounds": {
+          "x": 158,
+          "y": 417
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "等于",
+        "bounds": {
+          "x": 158,
+          "y": 463
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "零",
+        "bounds": {
+          "x": 81,
+          "y": 464
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "一",
+        "bounds": {
+          "x": 43,
+          "y": 418
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "二",
+        "bounds": {
+          "x": 81,
+          "y": 418
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "三",
+        "bounds": {
+          "x": 120,
+          "y": 418
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "四",
+        "bounds": {
+          "x": 43,
+          "y": 372
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "五",
+        "bounds": {
+          "x": 81,
+          "y": 372
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "六",
+        "bounds": {
+          "x": 120,
+          "y": 372
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "七",
+        "bounds": {
+          "x": 43,
+          "y": 326
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "八",
+        "bounds": {
+          "x": 81,
+          "y": 326
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "九",
+        "bounds": {
+          "x": 120,
+          "y": 326
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Button",
+        "name": "十进制分隔符",
+        "bounds": {
+          "x": 120,
+          "y": 464
+        }
+      },
+      {
+        "depth": 5,
+        "role": "Button",
+        "name": "正负",
+        "bounds": {
+          "x": 43,
+          "y": 464
+        }
+      },
+      {
+        "depth": 6,
+        "role": "Text",
+        "name": "",
+        "bounds": {
+          "x": 43,
+          "y": 464
+        }
+      },
+      {
+        "depth": 4,
+        "role": "Text",
+        "name": "标准 计算器模式",
+        "bounds": {
+          "x": 56,
+          "y": 75
+        }
+      },
+      {
+        "depth": 4,
+        "role": "Button",
+        "name": "始终置顶",
+        "bounds": {
+          "x": 79,
+          "y": 77
+        }
+      },
+      {
+        "depth": 5,
+        "role": "Text",
+        "name": "",
+        "bounds": {
+          "x": 79,
+          "y": 77
+        }
+      }
+    ]
+  }
+}
