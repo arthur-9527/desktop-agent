@@ -1,6 +1,6 @@
 """Prompt 模板模块
 
-新的提示词系统，支持静态提示词和动态提示词分离。
+统一的提示词系统，包含静态提示词和动态提示词。
 
 ## 使用方式
 
@@ -31,14 +31,21 @@ system_prompt = build_planner_prompt(
 )
 ```
 
-### 3. 单独构建提示词
+### 3. 统一验证提示词
 
 ```python
-from src.prompts.static import get_shortcuts, AVAILABLE_ACTIONS
-from src.prompts import build_vision_grounding_prompt, build_calibrator_prompt
+from src.prompts import build_verification_prompt, build_verification_message
 
-shortcuts = get_shortcuts("Windows")
-vision_prompt = build_vision_grounding_prompt("找到保存按钮")
+# 构建 user message（包含截图）
+message = build_verification_message(
+    verification_prompt="验证保存成功",
+    focus_diff="...",
+    tree_diff="...",
+    screenshot_base64="..."
+)
+
+# 或仅构建文本提示词
+prompt_text = build_verification_prompt("验证保存成功")
 ```
 """
 
@@ -46,8 +53,7 @@ vision_prompt = build_vision_grounding_prompt("找到保存按钮")
 from .builder import PromptBuilder, build_planner_prompt
 from .calibrator import build_calibrator_prompt, CALIBRATOR_PROMPT
 from .vision_grounding import build_vision_grounding_prompt, VISION_GROUNDING_PROMPT
-from .vision_verification import build_vision_verification_prompt, VISION_VERIFICATION_PROMPT
-from .accessibility_verification import build_accessibility_verification_prompt, ACCESSIBILITY_VERIFICATION_PROMPT
+from .verification import build_verification_prompt, build_verification_message, VERIFICATION_PROMPT
 
 # 静态提示词导出
 from .static import (
@@ -65,7 +71,6 @@ from .dynamic import build_dynamic_prompt
 # 为了向后兼容，保留旧的函数别名
 build_system_prompt = build_planner_prompt
 build_vision_prompt = build_vision_grounding_prompt
-build_verification_prompt = build_vision_verification_prompt
 
 
 __all__ = [
@@ -76,14 +81,13 @@ __all__ = [
     "build_planner_prompt",
     "build_calibrator_prompt",
     "build_vision_grounding_prompt",
-    "build_vision_verification_prompt",
-    "build_accessibility_verification_prompt",
+    "build_verification_prompt",
+    "build_verification_message",
     "build_dynamic_prompt",
     
     # 向后兼容别名
     "build_system_prompt",
     "build_vision_prompt",
-    "build_verification_prompt",
     
     # 提示词常量
     "SYSTEM_ROLE",
@@ -93,8 +97,7 @@ __all__ = [
     "VERIFICATION_METHODS",
     "CALIBRATOR_PROMPT",
     "VISION_GROUNDING_PROMPT",
-    "VISION_VERIFICATION_PROMPT",
-    "ACCESSIBILITY_VERIFICATION_PROMPT",
+    "VERIFICATION_PROMPT",
     
     # 工具函数
     "get_shortcuts",
