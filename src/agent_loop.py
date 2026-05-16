@@ -647,10 +647,14 @@ class DeskAgent:
         """
         try:
             # 截图（不带网格）
+            print(f"[Vision] ====== 开始视觉定位 ======")
+            print(f"[Vision] 输入提示词: {target_description}")
             screenshot = await self.client.screenshot()
+            print(f"[Vision] 截图完成: {screenshot.get('width', '?')}x{screenshot.get('height', '?')}")
 
             # 构建视觉定位 prompt
             vision_prompt = build_vision_grounding_prompt(target_description)
+            print(f"[Vision] 发送给模型的完整 prompt:\n{vision_prompt}")
             
             # 调用 UI-TARS
             response = await self.vision_model.chat.completions.create(
@@ -677,20 +681,61 @@ class DeskAgent:
             
             result = response.choices[0].message.content or ""
             
+            # 记录 Token 使用情况
+            usage = getattr(response, 'usage', None)
+            if usage:
+                print(f"[Vision] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
+            
+            # 记录视觉大模型原始输出
+            print(f"[Vision] 视觉大模型原始输出:\n{result}")
+            
+            # 标准化前记录原始内容中的坐标格式
+            raw_point_match = re.search(r'<point[^>]*>', result)
+            if raw_point_match:
+                print(f"[Vision] 原始坐标标签: {raw_point_match.group(0)}")
+            
             # 标准化坐标格式：将 <point x1="..." y1="..."> 转换为 <point>x y</point>
+            result_before_norm = result
             result = self._normalize_point_format(result)
+            if result != result_before_norm:
+                print(f"[Vision] 格式标准化完成: 原始 -> 标准化")
+            else:
+                print(f"[Vision] 格式无需标准化（已是 <point>x y</point> 格式）")
+            
+            # 记录标准化后的文本
+            print(f"[Vision] 标准化后内容:\n{result}")
             
             # 解析像素坐标并转换为归一化坐标 (0-1000)
             pixel_x, pixel_y = self._parse_pixel_coordinates(result)
+            print(f"[Vision] 像素坐标解析: pixel_x={pixel_x}, pixel_y={pixel_y}")
+            
             if pixel_x is not None and pixel_y is not None:
+                # 记录归一化计算过程
+                width = self.config.screenshot_max_width   # 1366
+                height = self.config.screenshot_max_height  # 768
+                calc_x = f"{pixel_x} × 1000 ÷ {width} = {int(pixel_x * 1000 / width)}"
+                calc_y = f"{pixel_y} × 1000 ÷ {height} = {int(pixel_y * 1000 / height)}"
+                print(f"[Vision] 归一化计算: x = {calc_x}")
+                print(f"[Vision] 归一化计算: y = {calc_y}")
+                
                 normalized_x, normalized_y = self._pixel_to_normalized(pixel_x, pixel_y)
                 result = f"目标已定位: 归一化坐标 ({normalized_x}, {normalized_y})"
                 print(f"[Vision] 像素坐标 ({pixel_x}, {pixel_y}) -> 归一化坐标 ({normalized_x}, {normalized_y})")
+            else:
+                print(f"[Vision] 警告: 未能从模型输出中解析出像素坐标")
+                # 尝试从原始输出中提取更多信息
+                point_tags = re.findall(r'<point[^>]*>', result_before_norm)
+                print(f"[Vision] 原始输出中的 point 标签: {point_tags}")
+            
+            print(f"[Vision] 最终返回结果: {result}")
+            print(f"[Vision] ====== 视觉定位结束 ======")
             
             return result
             
         except Exception as e:
-            print(f"[Vision] 调用失败: {e}")
+            print(f"[Vision] 调用失败: {type(e).__name__}: {e}")
+            import traceback
+            print(f"[Vision] 异常堆栈:\n{traceback.format_exc()}")
             return None
     
     async def _verify_with_vision(self, verification_prompt: str) -> tuple:
@@ -758,6 +803,11 @@ class DeskAgent:
         支持的输入格式：
         - <point x1="157" y1="44"> -> <point>157 44</point>
         - <point x1="157" y1="44" alt="..."> -> <point>157 44</point>
+        - <points x1='X,Y' alt='...'> -> <point>X Y</point>      (UI-TARS 特有)
+        - <point>x1='X,Y'</point> -> <point>X Y</point>          (UI-TARS 特有)
+        - <point>x1(X,Y)</point> -> <point>X Y</point>           (UI-TARS 特有)
+        - <point>(X,Y)</point> -> <point>X Y</point>             (UI-TARS 特有)
+        - (X,Y) -> <point>X Y</point>                            (UI-TARS 特有，裸括号)
         - <point>157 44</point> -> 保持不变
         
         Args:
@@ -766,22 +816,63 @@ class DeskAgent:
         Returns:
             标准化后的文本
         """
-        # 匹配 <point x1="..." y1="..."> 格式
-        pattern = r'<point\s+x1="(\d+)"\s+y1="(\d+)"[^>]*>'
+        changed = False
         
-        def replace_point(match):
-            x = match.group(1)
-            y = match.group(2)
-            return f'<point>{x} {y}</point>'
+        # 1. 匹配 <point x1="X" y1="Y"> 格式（HTML 属性格式）
+        pattern1 = r'<point\s+x1="(\d+)"\s+y1="(\d+)"[^>]*>'
+        def replace_point1(match):
+            nonlocal changed
+            changed = True
+            return f'<point>{match.group(1)} {match.group(2)}</point>'
+        text = re.sub(pattern1, replace_point1, text)
         
-        # 替换所有匹配项
-        normalized = re.sub(pattern, replace_point, text)
+        # 2. 匹配 <points x1='X,Y' alt='...'> 或 <points x1="X,Y" alt="..."> 格式（UI-TARS 特有，x1 逗号分隔，支持单引号/双引号）
+        pattern2 = r"<points\s+x1=['\"](\d+),(\d+)['\"][^>]*>"
+        def replace_points(match):
+            nonlocal changed
+            changed = True
+            return f'<point>{match.group(1)} {match.group(2)}</point>'
+        text = re.sub(pattern2, replace_points, text)
+        
+        # 3. 匹配 <point>x1='X,Y'</point> 格式（UI-TARS 特有，坐标在标签文本中）
+        pattern3 = r"<point>x1='(\d+),(\d+)'"
+        def replace_point_text_quote(match):
+            nonlocal changed
+            changed = True
+            return f'<point>{match.group(1)} {match.group(2)}'
+        text = re.sub(pattern3, replace_point_text_quote, text)
+        
+        # 4. 匹配 <point>x1(X,Y)</point> 格式（UI-TARS 特有，括号格式）
+        pattern4 = r"<point>x1\((\d+),(\d+)\)"
+        def replace_point_paren(match):
+            nonlocal changed
+            changed = True
+            return f'<point>{match.group(1)} {match.group(2)}'
+        text = re.sub(pattern4, replace_point_paren, text)
+        
+        # 5. 匹配 <point>(X,Y)</point> 格式（UI-TARS 特有，括号包裹坐标）
+        pattern5 = r"<point>\((\d+),(\d+)\)"
+        def replace_bracket_point(match):
+            nonlocal changed
+            changed = True
+            return f'<point>{match.group(1)} {match.group(2)}'
+        text = re.sub(pattern5, replace_bracket_point, text)
+        
+        # 6. 匹配裸括号格式 (X,Y) - 不在任何 XML 标签内时作为兜底
+        # 只匹配行首或空白符后面的括号坐标
+        if not changed:
+            pattern6 = r'(?:^|\s)\((\d+),(\d+)\)(?:\s|$)'
+            def replace_bare_bracket(match):
+                nonlocal changed
+                changed = True
+                return f' <point>{match.group(1)} {match.group(2)}</point> '
+            text = re.sub(pattern6, replace_bare_bracket, text)
         
         # 如果有变化，记录日志
-        if normalized != text:
+        if changed:
             print(f"[Vision] 坐标格式已标准化")
         
-        return normalized
+        return text
     
     def _parse_pixel_coordinates(self, text: str) -> tuple:
         """从文本中解析像素坐标
@@ -794,8 +885,10 @@ class DeskAgent:
         Returns:
             (pixel_x, pixel_y) 或 (None, None) 如果未找到坐标
         """
-        # 匹配 <point>x y</point> 格式
-        match = re.search(r'<point\s+(\d+)\s+(\d+)[\s>]', text)
+        # 匹配 <point>x y</point> 或 <point X Y...> 格式
+        # 标准化后格式: <point>692 104</point> -> 尾随 < 来自 </point>
+        # 未标准化格式: <point 692 104...</point> -> 尾随空格
+        match = re.search(r'<point[>\s]+(\d+)\s+(\d+)(?:[<\s/]|$)', text)
         if match:
             return int(match.group(1)), int(match.group(2))
         

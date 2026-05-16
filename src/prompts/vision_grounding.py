@@ -8,8 +8,7 @@ VISION_GROUNDING_PROMPT = """Please locate the following target element based on
 ## Task
 
 1. Locate the target element in the screenshot
-2. If found, return the center coordinates of the element using `<point>x y</point>` format
-3. Briefly describe the element you see and its position
+2. Briefly describe the element you see and its position
 
 !!! VERY IMPORTANT !!! Carefully distinguish between similar elements (e.g. address bar vs search bar in a browser). The one with a magnifying glass icon is usually the search bar. If the target is NOT visible, respond with "Target not found".
 """
