@@ -1,16 +1,30 @@
-"""Vision grounding prompt (UI-TARS)"""
+"""视觉定位（Vision Grounding）prompt —— 中文 + JSON 格式输出"""
 
 
-VISION_GROUNDING_PROMPT = """Please locate the following target element based on the screenshot:
+VISION_GROUNDING_PROMPT = """请根据截图定位以下目标元素：
 
 {target_description}
 
-## Task
+## 任务
 
-1. Locate the target element in the screenshot
-2. Briefly describe the element you see and its position
+1. 在截图中定位目标元素
+2. 返回该元素中心点的像素坐标
 
-!!! VERY IMPORTANT !!! Carefully distinguish between similar elements (e.g. address bar vs search bar in a browser). The one with a magnifying glass icon is usually the search bar. If the target is NOT visible, respond with "Target not found".
+## 输出格式
+你必须严格按照以下 JSON 格式输出，不要输出任何其他内容：
+{{
+    "found": true/false,
+    "x": 整数像素坐标X,
+    "y": 整数像素坐标Y,
+    "desc": "简短的中文描述"
+}}
+
+如果目标元素无法精确定位（例如有多个相似候选、未完全可见、无显著特征等），
+请用 desc 字段尽可能多地列举与目标相关的 UI 元素信息和坐标，供用户决策：
+{{
+    "found": false,
+    "desc": "列举所有可能相关的UI元素及其位置信息"
+}}
 """
 
 

@@ -672,26 +672,32 @@ class DeskAgent:
         self, 
         target_description: str
     ) -> Optional[str]:
-        """调用 UI-TARS 进行视觉定位
+        """调用 UI-TARS 进行视觉定位（中文 prompt + JSON 格式输出）
+        
+        流程：
+        1. 解析 JSON 输出
+        2. found=true + x/y → 计算归一化坐标，返回 "目标已定位: 归一化坐标 (nx, ny)"
+        3. found=false + desc → 返回 desc 文本（含多个候选元素坐标），LLM 自行选择
+        4. JSON 格式解析失败 → 返回原始输出 + 转换公式，LLM 自行提取
         
         Args:
             target_description: 目标元素描述
         
         Returns:
-            包含归一化坐标的结果描述，失败返回 None
+            结果描述字符串。
         """
         try:
-            # 截图（不带网格）
             logger.info(f"[Vision] ====== 开始视觉定位 ======")
             logger.info(f"[Vision] 输入提示词: {target_description}")
             screenshot = await self.client.screenshot()
             logger.info(f"[Vision] 截图完成: {screenshot.get('width', '?')}x{screenshot.get('height', '?')}")
 
-            # 构建视觉定位 prompt
+            width = self.config.screenshot_max_width   # 1366
+            height = self.config.screenshot_max_height  # 768
+
             vision_prompt = build_vision_grounding_prompt(target_description)
             logger.info(f"[Vision] 发送给模型的完整 prompt:\n{vision_prompt}")
             
-            # 调用 UI-TARS
             response = await self.vision_model.chat.completions.create(
                 model=self.config.vision_model,
                 messages=[
@@ -714,53 +720,39 @@ class DeskAgent:
                 max_tokens=256,
             )
             
-            result = response.choices[0].message.content or ""
+            raw_output = response.choices[0].message.content or ""
             
-            # 记录 Token 使用情况
             usage = getattr(response, 'usage', None)
             if usage:
                 logger.info(f"[Vision] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
             
-            # 记录视觉大模型原始输出
-            logger.info(f"[Vision] 视觉大模型原始输出:\n{result}")
+            logger.info(f"[Vision] 视觉大模型原始输出:\n{raw_output}")
             
-            # 标准化前记录原始内容中的坐标格式
-            raw_point_match = re.search(r'<point[^>]*>', result)
-            if raw_point_match:
-                logger.info(f"[Vision] 原始坐标标签: {raw_point_match.group(0)}")
-            
-            # 标准化坐标格式：将 <point x1="..." y1="..."> 转换为 <point>x y</point>
-            result_before_norm = result
-            result = self._normalize_point_format(result)
-            if result != result_before_norm:
-                logger.info(f"[Vision] 格式标准化完成: 原始 -> 标准化")
-            else:
-                logger.info(f"[Vision] 格式无需标准化（已是 <point>x y</point> 格式）")
-            
-            # 记录标准化后的文本
-            logger.info(f"[Vision] 标准化后内容:\n{result}")
-            
-            # 解析像素坐标并转换为归一化坐标 (0-1000)
-            pixel_x, pixel_y = self._parse_pixel_coordinates(result)
-            logger.info(f"[Vision] 像素坐标解析: pixel_x={pixel_x}, pixel_y={pixel_y}")
+            # ====== 解析 JSON 输出 ======
+            # 返回值: (x, y, desc_text) 
+            #   - found=true + 解析到坐标: (pixel_x, pixel_y, None)
+            #   - found=false/JSON 格式解析失败: (None, None, desc_or_raw)
+            pixel_x, pixel_y, desc_or_raw = self._parse_vision_json_output(raw_output)
             
             if pixel_x is not None and pixel_y is not None:
-                # 记录归一化计算过程
-                width = self.config.screenshot_max_width   # 1366
-                height = self.config.screenshot_max_height  # 768
-                calc_x = f"{pixel_x} × 1000 ÷ {width} = {int(pixel_x * 1000 / width)}"
-                calc_y = f"{pixel_y} × 1000 ÷ {height} = {int(pixel_y * 1000 / height)}"
-                logger.info(f"[Vision] 归一化计算: x = {calc_x}")
-                logger.info(f"[Vision] 归一化计算: y = {calc_y}")
-                
+                # 情况 1: 精确定位到单个元素
+                logger.info(f"[Vision] 精确定位: pixel_x={pixel_x}, pixel_y={pixel_y}")
                 normalized_x, normalized_y = self._pixel_to_normalized(pixel_x, pixel_y)
                 result = f"目标已定位: 归一化坐标 ({normalized_x}, {normalized_y})"
                 logger.info(f"[Vision] 像素坐标 ({pixel_x}, {pixel_y}) -> 归一化坐标 ({normalized_x}, {normalized_y})")
+            elif desc_or_raw:
+                # 情况 2 + 3: 模型返回了 desc（候选列举）或 JSON 解析失败（原始文本）
+                # 不管是 desc 还是 raw_output，都原样传递给 LLM，
+                # 附加坐标转换公式方便 LLM 自行计算
+                logger.info(f"[Vision] 获取到文本描述，传递回 LLM")
+                result = (
+                    f"视觉定位结果：{desc_or_raw}\n"
+                    f"注意：以上坐标是像素坐标，如需使用请转换为归一化坐标："
+                    f"x = x/{width}*1000，y=y/{height}*1000"
+                )
             else:
-                logger.warning(f"[Vision] 未能从模型输出中解析出像素坐标")
-                # 尝试从原始输出中提取更多信息
-                point_tags = re.findall(r'<point[^>]*>', result_before_norm)
-                logger.info(f"[Vision] 原始输出中的 point 标签: {point_tags}")
+                logger.warning(f"[Vision] 视觉定位无任何输出")
+                result = raw_output
             
             logger.info(f"[Vision] 最终返回结果: {result}")
             logger.info(f"[Vision] ====== 视觉定位结束 ======")
@@ -771,6 +763,98 @@ class DeskAgent:
             logger.error(f"[Vision] 调用失败: {type(e).__name__}: {e}")
             import traceback
             logger.debug(f"[Vision] 异常堆栈:\n{traceback.format_exc()}")
+            return None
+    
+    def _parse_vision_json_output(self, text: str) -> tuple:
+        """解析 UI-TARS 返回的 JSON 格式输出
+        
+        三种返回值：
+        1. found=true + x/y → (pixel_x, pixel_y, None)        # 精确定位
+        2. found=false + desc → (None, None, desc_text)       # 候选列举
+        3. JSON 格式解析失败 → (None, None, raw_output)       # 原始文本
+        
+        Args:
+            text: 模型输出的原始文本
+        
+        Returns:
+            (pixel_x or None, pixel_y or None, desc_or_raw or None)
+        """
+        text = text.strip()
+        
+        # 1. 移除 markdown 代码块包裹
+        json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        if json_match:
+            text = json_match.group(1).strip()
+        
+        # 2. 尝试解析 JSON
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # JSON 解析失败，尝试修复
+            data = self._repair_vision_json(text)
+            if data is None:
+                # 解析失败 → 返回原始文本，LLM 自行提取
+                return None, None, text
+        
+        # 3. 检查 found 字段
+        found = data.get("found", False)
+        
+        if not found:
+            # found=false: 返回 desc 文本（模型列举了多个候选）
+            desc = data.get("desc", "")
+            return None, None, desc
+        
+        # 4. found=true: 提取 x/y 坐标
+        raw_x = data.get("x")
+        raw_y = data.get("y")
+        
+        if raw_x is None or raw_y is None:
+            desc = data.get("desc", "")
+            return None, None, desc if desc else text
+        
+        # 处理 x 可能是字符串且包含逗号的情况（如 "561,98" -> x=561, y=98）
+        if isinstance(raw_x, str) and "," in raw_x:
+            parts = raw_x.split(",")
+            try:
+                pixel_x = int(parts[0].strip())
+                pixel_y = int(parts[1].strip()) if len(parts) > 1 else int(raw_y)
+                return pixel_x, pixel_y, None
+            except (ValueError, IndexError):
+                pass
+        
+        # 处理 x/y 可能是 float（如 636.0）
+        try:
+            pixel_x = int(float(raw_x))
+            pixel_y = int(float(raw_y))
+            return pixel_x, pixel_y, None
+        except (ValueError, TypeError):
+            desc = data.get("desc", "")
+            return None, None, desc if desc else text
+    
+    def _repair_vision_json(self, text: str) -> Optional[dict]:
+        """尝试修复 UI-TARS 返回的破损 JSON
+        
+        修复场景：
+        - "x": 665,,  ->  "x": 665
+        - "x": 665,   ->  "x": 665  (尾随逗号)
+        - 部分字段缺失
+        
+        Args:
+            text: 需要修复的 JSON 文本
+        
+        Returns:
+            修复后的字典，修复失败返回 None
+        """
+        # 1. 修复重复逗号:  665,,  ->  665
+        text = re.sub(r',\s*,', ',', text)
+        
+        # 2. 修复对象内尾随逗号:  "x": 665, }  ->  "x": 665 }
+        text = re.sub(r',\s*}', '}', text)
+        
+        # 3. 再次尝试解析
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
             return None
     
     def _normalize_point_format(self, text: str) -> str:
