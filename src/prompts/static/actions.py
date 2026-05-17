@@ -23,7 +23,7 @@ AVAILABLE_ACTIONS = """## 可用动作
 ### 系统动作
 | 动作 | 格式 | 说明 |
 |------|------|------|
-| wait | `wait()` | 等待 5 秒 |
+| wait | `wait()` | 等待 5 秒，可以用于获取更多当前界面信息 |
 | finished | `finished(content='原因')` | 任务完成 |
 | failed | `failed(content='原因')` | 任务失败 |
 
