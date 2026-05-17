@@ -14,11 +14,20 @@ from src.desktoptools import DesktopClient
 from src.agent_loop import DeskAgent
 from src.config import get_config
 from src.utils import check_services
+from src.logger import configure_logging, get_logger
+
+logger = get_logger(__name__)
 
 
 async def main():
     """主函数"""
     config = get_config()
+
+    # 配置日志
+    configure_logging(
+        level=config.log_level,
+        log_file=config.log_file if config.log_file else None,
+    )
 
     # AgentDesk 客户端
     client = DesktopClient(
@@ -49,15 +58,16 @@ async def main():
 
     # 检查服务
     if not await check_services(client, vision_model, config):
-        print("\n服务检查失败，请检查配置后重试。")
+        logger.error("服务检查失败，请检查配置后重试。")
         sys.exit(1)
 
-    print("\n" + "=" * 50)
-    print("DeskAgent 已就绪 (三模型架构)")
-    print("=" * 50)
-    print(f"  Planner: {config.general_model}")
-    print(f"  Vision:  {config.vision_model}")
-    print("=" * 50)
+    print()  # 空行（不影响日志结构）
+    logger.info("=" * 50)
+    logger.info("DeskAgent 已就绪 (三模型架构)")
+    logger.info("=" * 50)
+    logger.info(f"  Planner: {config.general_model}")
+    logger.info(f"  Vision:  {config.vision_model}")
+    logger.info("=" * 50)
 
     # 获取任务
     if len(sys.argv) > 1:
@@ -66,11 +76,11 @@ async def main():
         task = input("\n请输入任务: ")
 
     if not task.strip():
-        print("任务不能为空")
+        logger.error("任务不能为空")
         sys.exit(1)
 
-    print(f"\n开始执行任务: {task}")
-    print("=" * 50)
+    logger.info(f"开始执行任务: {task}")
+    logger.info("=" * 50)
 
     # 创建 Agent
     agent = DeskAgent(
@@ -85,21 +95,21 @@ async def main():
     result = await agent.run(task)
 
     # 输出结果
-    print("\n" + "=" * 50)
-    print("执行结果")
-    print("=" * 50)
-    print(f"状态: {'成功 ✓' if result['success'] else '失败 ✗'}")
-    print(f"步骤: {result['steps']}")
-    print(f"信息: {result['message']}")
-    
+    logger.info("=" * 50)
+    logger.info("执行结果")
+    logger.info("=" * 50)
+    logger.info(f"状态: {'成功 ✓' if result['success'] else '失败 ✗'}")
+    logger.info(f"步骤: {result['steps']}")
+    logger.info(f"信息: {result['message']}")
+
     # Metrics 报告
     if result.get('metrics'):
         metrics = result['metrics']
-        print("\nMetrics:")
-        print(f"  成功率: {metrics.get('success_rate', 'N/A')}")
-        print(f"  总耗时: {metrics.get('total_time_s', 0)}s")
-        print(f"  模型调用: Planner={metrics.get('model_calls', {}).get('planner', 0)}, "
-              f"Vision={metrics.get('model_calls', {}).get('vision', 0)}")
+        logger.info("Metrics:")
+        logger.info(f"  成功率: {metrics.get('success_rate', 'N/A')}")
+        logger.info(f"  总耗时: {metrics.get('total_time_s', 0)}s")
+        logger.info(f"  模型调用: Planner={metrics.get('model_calls', {}).get('planner', 0)}, "
+                     f"Vision={metrics.get('model_calls', {}).get('vision', 0)}")
 
     # 关闭连接
     await client.close()

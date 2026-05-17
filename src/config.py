@@ -39,6 +39,7 @@ class Config:
 
     # 日志
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
+    log_file: str = os.getenv("LOG_FILE", "")
 
     # 调试模式
     debug: bool = os.getenv("DEBUG", "false").lower() == "true"

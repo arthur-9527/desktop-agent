@@ -32,6 +32,9 @@ from .prompts.verification import (
 )
 from .metrics import RunMetrics, StepMetric, MetricsTimer
 from .config import Config
+from .logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ExecutionHistory:
@@ -167,7 +170,7 @@ class DeskAgent:
         try:
             focused_element = await self.client.accessibility_focused()
         except Exception as e:
-            print(f"[聚焦元素] 获取失败: {e}")
+            logger.warning(f"[聚焦元素] 获取失败: {e}")
         
         # 格式化聚焦元素信息
         focused_info = create_focused_element_table(focused_element)
@@ -175,7 +178,7 @@ class DeskAgent:
         # 获取操作系统类型
         self.global_info = self._accessibility_parser.parse(raw_tree_before, None, focused_element)
         os_type = self.global_info.os if self.global_info else "Windows"
-        print(f"[全局信息] 操作系统: {os_type}")
+        logger.info(f"[全局信息] 操作系统: {os_type}")
         
         # 初始化 ActionExecutor
         self.action_executor = ActionExecutor(self.client, os_type=os_type)
@@ -197,8 +200,8 @@ class DeskAgent:
         
         # 主循环
         for step in range(self.max_steps):
-            print(f"\n{'=' * 50}")
-            print(f"Step {step + 1}/{self.max_steps}")
+            logger.info("=" * 50)
+            logger.info(f"Step {step + 1}/{self.max_steps}")
             
             step_metric = StepMetric(
                 step=step + 1,
@@ -239,35 +242,35 @@ class DeskAgent:
                         # 记录 token 使用情况
                         usage = getattr(response, 'usage', None)
                         if usage:
-                            print(f"[Planner] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
+                            logger.info(f"[Planner] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
                         
                         # 检查输出是否为空
                         if not planner_output.strip():
-                            print(f"[Planner] 警告: 输出为空, finish_reason={finish_reason}")
+                            logger.warning(f"[Planner] 输出为空, finish_reason={finish_reason}")
                             if retry < max_retries - 1:
-                                print(f"[Planner] 重试 {retry + 2}/{max_retries}...")
+                                logger.info(f"[Planner] 重试 {retry + 2}/{max_retries}...")
                                 await asyncio.sleep(0.5)
                                 continue
                         else:
                             # 输出正常，退出重试循环
                             break
                     else:
-                        print(f"[Planner] 警告: API 响应无 choices")
+                        logger.warning(f"[Planner] API 响应无 choices")
                         if retry < max_retries - 1:
-                            print(f"[Planner] 重试 {retry + 2}/{max_retries}...")
+                            logger.info(f"[Planner] 重试 {retry + 2}/{max_retries}...")
                             await asyncio.sleep(0.5)
                             continue
                         
                 except Exception as e:
                     step_metric.planning_time_ms = timer.stop()
                     step_metric.error = str(e)
-                    print(f"[Planner] API 调用异常: {type(e).__name__}: {e}")
+                    logger.error(f"[Planner] API 调用异常: {type(e).__name__}: {e}")
                     if retry < max_retries - 1:
-                        print(f"[Planner] 重试 {retry + 2}/{max_retries}...")
+                        logger.info(f"[Planner] 重试 {retry + 2}/{max_retries}...")
                         await asyncio.sleep(0.5)
                         continue
                     else:
-                        print(f"[Planner] 达到最大重试次数，跳过此步")
+                        logger.warning(f"[Planner] 达到最大重试次数，跳过此步")
                         self._metrics.add_step(step_metric)
                         continue
             
@@ -275,20 +278,20 @@ class DeskAgent:
             
             # 检查是否有有效输出
             if not planner_output or not planner_output.strip():
-                print(f"[Planner] 输出为空，跳过此步")
+                logger.warning(f"[Planner] 输出为空，跳过此步")
                 self._history.add(f"Step {step + 1}: Planner 输出为空")
                 step_metric.error = "Planner 输出为空"
                 self._metrics.add_step(step_metric)
                 continue
             
-            print(f"[Planner] 输出: {planner_output[:200]}{'...' if len(planner_output) > 200 else ''}")
+            logger.info(f"[Planner] 输出: {planner_output[:200]}{'...' if len(planner_output) > 200 else ''}")
             
             # 解析 Planner 输出
             parsed = self._parse_planner_output(planner_output)
             
             if parsed is None:
-                print(f"[Planner] JSON 解析失败")
-                print(f"[Planner] 原始输出内容:\n{planner_output[:500]}{'...' if len(planner_output) > 500 else ''}")
+                logger.warning(f"[Planner] JSON 解析失败")
+                logger.debug(f"[Planner] 原始输出内容:\n{planner_output[:500]}{'...' if len(planner_output) > 500 else ''}")
                 self._history.add(f"Step {step + 1}: 解析失败 - {planner_output[:100]}")
                 step_metric.error = "JSON 解析失败"
                 self._metrics.add_step(step_metric)
@@ -308,7 +311,7 @@ class DeskAgent:
                     self._execution_plan = ExecutionPlan(steps)
                     self._execution_plan.current = current
                     self._execution_plan.completed = completed
-                    print(f"[计划] 更新计划: {self._execution_plan.summary()}")
+                    logger.info(f"[计划] 更新计划: {self._execution_plan.summary()}")
             
             step_metric.action = action_str
             step_metric.action_type = self._extract_action_type(action_str)
@@ -319,7 +322,7 @@ class DeskAgent:
             
             # ========== Step 2: 判断是否需要视觉定位 ==========
             if use_vision_prompt is not None:
-                print(f"[Vision] 需要视觉定位: {use_vision_prompt}")
+                logger.info(f"[Vision] 需要视觉定位: {use_vision_prompt}")
                 step_metric.use_vision = True
                 
                 timer.start()
@@ -330,7 +333,7 @@ class DeskAgent:
                 step_metric.vision_time_ms = timer.stop()
                 
                 if vision_result:
-                    print(f"[Vision] 定位结果: {vision_result}")
+                    logger.info(f"[Vision] 定位结果: {vision_result}")
                     self._history.add(f"Step {step + 1}: [视觉定位] {use_vision_prompt[:50]} → {vision_result[:100]}")
                     
                     # 将视觉结果注入上下文，继续下一步决策
@@ -363,13 +366,13 @@ class DeskAgent:
             action_type = action_parsed.get("action_type", "unknown")
             step_metric.action_type = action_type
             
-            print(f"[Action] 类型: {action_type}")
-            print(f"[Action] 完整动作: {action_str}")
+            logger.info(f"[Action] 类型: {action_type}")
+            logger.info(f"[Action] 完整动作: {action_str}")
             
             # 判断是否完成
             if action_type == "finished":
                 message = action_parsed.get("action_inputs", {}).get("content", "Done")
-                print(f"\n✓ 任务完成: {message}")
+                logger.info(f"\n✓ 任务完成: {message}")
                 self._history.add(f"Step {step + 1}: [完成] {message}")
                 step_metric.success = True
                 self._metrics.add_step(step_metric)
@@ -378,7 +381,7 @@ class DeskAgent:
             
             if action_type == "failed":
                 message = action_parsed.get("action_inputs", {}).get("content", "Failed")
-                print(f"\n✗ 任务失败: {message}")
+                logger.info(f"\n✗ 任务失败: {message}")
                 self._history.add(f"Step {step + 1}: [失败] {message}")
                 step_metric.error = message
                 self._metrics.add_step(step_metric)
@@ -397,13 +400,13 @@ class DeskAgent:
             tree_before_action = None
             focused_before_action = None
             if verification_prompt:
-                print(f"[验证] 验证目标: {verification_prompt}")
-                print(f"[验证] 执行前采集树和聚焦快照")
+                logger.info(f"[验证] 验证目标: {verification_prompt}")
+                logger.info(f"[验证] 执行前采集树和聚焦快照")
                 tree_before_action = await self._get_accessibility_tree_depth(15)
                 try:
                     focused_before_action = await self.client.accessibility_focused()
                 except Exception as e:
-                    print(f"[验证] 获取聚焦元素失败: {e}")
+                    logger.warning(f"[验证] 获取聚焦元素失败: {e}")
 
             # ========== Step 4: 执行操作 ==========
             timer.start()
@@ -415,7 +418,7 @@ class DeskAgent:
             except Exception as e:
                 step_metric.execution_time_ms = timer.stop()
                 step_metric.error = str(e)
-                print(f"[Action] 执行失败: {e}")
+                logger.error(f"[Action] 执行失败: {e}")
                 self._history.add(f"Step {step + 1}: [执行失败] {action_type} - {e}")
                 self._metrics.add_step(step_metric)
                 continue
@@ -440,7 +443,7 @@ class DeskAgent:
             # ========== Step 5: 验证（统一验证流程） ==========
             if verification_prompt:
                 timer.start()
-                print(f"[验证] 开始验证，验证目标: {verification_prompt}")
+                logger.info(f"[验证] 开始验证，验证目标: {verification_prompt}")
 
                 # 获取操作后的无障碍树和截图
                 tree_after_action = await self._get_accessibility_tree_depth(15)
@@ -451,16 +454,16 @@ class DeskAgent:
                 try:
                     focused_after_action = await self.client.accessibility_focused()
                 except Exception as e:
-                    print(f"[验证] 获取聚焦元素失败: {e}")
+                    logger.warning(f"[验证] 获取聚焦元素失败: {e}")
 
                 # 计算聚焦变化
                 focus_diff, focus_changed = diff_focused(focused_before_action, focused_after_action)
-                print(f"[验证] 聚焦变化: {focus_diff[:200]}")
+                logger.info(f"[验证] 聚焦变化: {focus_diff[:200]}")
 
                 # 计算无障碍树差异
                 diff_result = diff_trees(tree_before_action, tree_after_action)
                 tree_diff = diff_result.format_for_llm(max_items=15) if diff_result.changed else "无障碍树结构无变化"
-                print(f"[验证] 树差异:\n{tree_diff[:300]}")
+                logger.info(f"[验证] 树差异:\n{tree_diff[:300]}")
 
                 # 调用校准模型进行统一验证
                 verification_message = build_verification_message(
@@ -490,11 +493,11 @@ class DeskAgent:
                     reason = f"验证解析失败: {result[:100]}"
 
                 if success:
-                    print(f"[验证] 操作成功: {reason}")
+                    logger.info(f"[验证] 操作成功: {reason}")
                     step_metric.success = True
                     self._history.add(f"Step {step + 1}: [成功] {action_type} - {reason}")
                 else:
-                    print(f"[验证] 操作失败: {reason}")
+                    logger.warning(f"[验证] 操作失败: {reason}")
                     step_metric.success = False
                     self._history.add(f"Step {step + 1}: [失败] {action_type} - {reason}")
 
@@ -505,7 +508,7 @@ class DeskAgent:
                 })
             else:
                 # 没有验证标准，默认成功
-                print(f"[验证] 无验证标准，默认成功")
+                logger.info(f"[验证] 无验证标准，默认成功")
                 step_metric.success = True
                 step_metric.verification_time_ms = 0
                 self._history.add(f"Step {step + 1}: [成功] {action_type} - 无验证标准")
@@ -531,9 +534,8 @@ class DeskAgent:
         # 清洗输出
         output = output.strip()
         
-        # 尝试提取 JSON
+        # 尝试直接解析
         try:
-            # 尝试直接解析
             return json.loads(output)
         except json.JSONDecodeError:
             pass
@@ -625,14 +627,14 @@ class DeskAgent:
         """
         try:
             # 截图（不带网格）
-            print(f"[Vision] ====== 开始视觉定位 ======")
-            print(f"[Vision] 输入提示词: {target_description}")
+            logger.info(f"[Vision] ====== 开始视觉定位 ======")
+            logger.info(f"[Vision] 输入提示词: {target_description}")
             screenshot = await self.client.screenshot()
-            print(f"[Vision] 截图完成: {screenshot.get('width', '?')}x{screenshot.get('height', '?')}")
+            logger.info(f"[Vision] 截图完成: {screenshot.get('width', '?')}x{screenshot.get('height', '?')}")
 
             # 构建视觉定位 prompt
             vision_prompt = build_vision_grounding_prompt(target_description)
-            print(f"[Vision] 发送给模型的完整 prompt:\n{vision_prompt}")
+            logger.info(f"[Vision] 发送给模型的完整 prompt:\n{vision_prompt}")
             
             # 调用 UI-TARS
             response = await self.vision_model.chat.completions.create(
@@ -662,30 +664,30 @@ class DeskAgent:
             # 记录 Token 使用情况
             usage = getattr(response, 'usage', None)
             if usage:
-                print(f"[Vision] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
+                logger.info(f"[Vision] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
             
             # 记录视觉大模型原始输出
-            print(f"[Vision] 视觉大模型原始输出:\n{result}")
+            logger.info(f"[Vision] 视觉大模型原始输出:\n{result}")
             
             # 标准化前记录原始内容中的坐标格式
             raw_point_match = re.search(r'<point[^>]*>', result)
             if raw_point_match:
-                print(f"[Vision] 原始坐标标签: {raw_point_match.group(0)}")
+                logger.info(f"[Vision] 原始坐标标签: {raw_point_match.group(0)}")
             
             # 标准化坐标格式：将 <point x1="..." y1="..."> 转换为 <point>x y</point>
             result_before_norm = result
             result = self._normalize_point_format(result)
             if result != result_before_norm:
-                print(f"[Vision] 格式标准化完成: 原始 -> 标准化")
+                logger.info(f"[Vision] 格式标准化完成: 原始 -> 标准化")
             else:
-                print(f"[Vision] 格式无需标准化（已是 <point>x y</point> 格式）")
+                logger.info(f"[Vision] 格式无需标准化（已是 <point>x y</point> 格式）")
             
             # 记录标准化后的文本
-            print(f"[Vision] 标准化后内容:\n{result}")
+            logger.info(f"[Vision] 标准化后内容:\n{result}")
             
             # 解析像素坐标并转换为归一化坐标 (0-1000)
             pixel_x, pixel_y = self._parse_pixel_coordinates(result)
-            print(f"[Vision] 像素坐标解析: pixel_x={pixel_x}, pixel_y={pixel_y}")
+            logger.info(f"[Vision] 像素坐标解析: pixel_x={pixel_x}, pixel_y={pixel_y}")
             
             if pixel_x is not None and pixel_y is not None:
                 # 记录归一化计算过程
@@ -693,27 +695,27 @@ class DeskAgent:
                 height = self.config.screenshot_max_height  # 768
                 calc_x = f"{pixel_x} × 1000 ÷ {width} = {int(pixel_x * 1000 / width)}"
                 calc_y = f"{pixel_y} × 1000 ÷ {height} = {int(pixel_y * 1000 / height)}"
-                print(f"[Vision] 归一化计算: x = {calc_x}")
-                print(f"[Vision] 归一化计算: y = {calc_y}")
+                logger.info(f"[Vision] 归一化计算: x = {calc_x}")
+                logger.info(f"[Vision] 归一化计算: y = {calc_y}")
                 
                 normalized_x, normalized_y = self._pixel_to_normalized(pixel_x, pixel_y)
                 result = f"目标已定位: 归一化坐标 ({normalized_x}, {normalized_y})"
-                print(f"[Vision] 像素坐标 ({pixel_x}, {pixel_y}) -> 归一化坐标 ({normalized_x}, {normalized_y})")
+                logger.info(f"[Vision] 像素坐标 ({pixel_x}, {pixel_y}) -> 归一化坐标 ({normalized_x}, {normalized_y})")
             else:
-                print(f"[Vision] 警告: 未能从模型输出中解析出像素坐标")
+                logger.warning(f"[Vision] 未能从模型输出中解析出像素坐标")
                 # 尝试从原始输出中提取更多信息
                 point_tags = re.findall(r'<point[^>]*>', result_before_norm)
-                print(f"[Vision] 原始输出中的 point 标签: {point_tags}")
+                logger.info(f"[Vision] 原始输出中的 point 标签: {point_tags}")
             
-            print(f"[Vision] 最终返回结果: {result}")
-            print(f"[Vision] ====== 视觉定位结束 ======")
+            logger.info(f"[Vision] 最终返回结果: {result}")
+            logger.info(f"[Vision] ====== 视觉定位结束 ======")
             
             return result
             
         except Exception as e:
-            print(f"[Vision] 调用失败: {type(e).__name__}: {e}")
+            logger.error(f"[Vision] 调用失败: {type(e).__name__}: {e}")
             import traceback
-            print(f"[Vision] 异常堆栈:\n{traceback.format_exc()}")
+            logger.debug(f"[Vision] 异常堆栈:\n{traceback.format_exc()}")
             return None
     
     def _normalize_point_format(self, text: str) -> str:
@@ -790,7 +792,7 @@ class DeskAgent:
         
         # 如果有变化，记录日志
         if changed:
-            print(f"[Vision] 坐标格式已标准化")
+            logger.info(f"[Vision] 坐标格式已标准化")
         
         return text
     
@@ -852,7 +854,7 @@ class DeskAgent:
         try:
             return await self.client.accessibility_tree(max_depth=10)
         except Exception as e:
-            print(f"[Accessibility] 获取失败: {e}")
+            logger.warning(f"[Accessibility] 获取失败: {e}")
             return {}
     
     async def _get_global_info_struct(self) -> Optional[GlobalInfo]:
@@ -861,7 +863,7 @@ class DeskAgent:
             tree = await self.client.accessibility_tree(max_depth=10)
             return self._accessibility_parser.parse(tree, None, None)
         except Exception as e:
-            print(f"[全局信息] 结构化数据获取失败: {e}")
+            logger.warning(f"[全局信息] 结构化数据获取失败: {e}")
             return None
     
     async def _get_global_info_table(self) -> str:
@@ -883,7 +885,7 @@ class DeskAgent:
             
             return create_info_table(tree, mouse_pos, focused)
         except Exception as e:
-            print(f"[全局信息] 获取失败: {e}")
+            logger.warning(f"[全局信息] 获取失败: {e}")
             return ""
     
     async def _get_info_table_from_tree(self, tree: dict) -> str:
@@ -911,7 +913,7 @@ class DeskAgent:
             
             return create_info_table(tree, mouse_pos, focused)
         except Exception as e:
-            print(f"[全局信息] 生成失败: {e}")
+            logger.warning(f"[全局信息] 生成失败: {e}")
             return ""
     
     def _trim_messages(self, messages: list) -> list:
@@ -934,7 +936,7 @@ class DeskAgent:
         # 每轮对话 = user + assistant = 2 条消息
         conversation_msgs = conversation_msgs[-keep_pairs * 2:]
         
-        print(f"[Context] 裁剪到最近 {keep_pairs} 轮对话（{len(conversation_msgs)} 条消息）")
+        logger.debug(f"[Context] 裁剪到最近 {keep_pairs} 轮对话（{len(conversation_msgs)} 条消息）")
         
         return [system_msg] + conversation_msgs
     
@@ -984,6 +986,5 @@ class DeskAgent:
         try:
             return await self.client.accessibility_tree(max_depth=max_depth)
         except Exception as e:
-            print(f"[Accessibility] 获取深度{max_depth}树失败: {e}")
+            logger.warning(f"[Accessibility] 获取深度{max_depth}树失败: {e}")
             return {}
-    
