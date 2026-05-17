@@ -9,6 +9,7 @@ from .rules import EXECUTION_RULES
 from .output_format import OUTPUT_FORMAT
 from .verification import VERIFICATION_METHODS
 from .shortcuts import get_shortcuts, WINDOWS_SHORTCUTS, MACOS_SHORTCUTS, LINUX_SHORTCUTS
+from .planning import PLANNING_PROMPT
 
 
 __all__ = [
@@ -21,4 +22,5 @@ __all__ = [
     "WINDOWS_SHORTCUTS",
     "MACOS_SHORTCUTS",
     "LINUX_SHORTCUTS",
+    "PLANNING_PROMPT",
 ]

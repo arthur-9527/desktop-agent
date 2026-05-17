@@ -10,6 +10,7 @@ from .static import (
     AVAILABLE_ACTIONS,
     EXECUTION_RULES,
     OUTPUT_FORMAT,
+    PLANNING_PROMPT,
     get_shortcuts,
 )
 
@@ -142,7 +143,9 @@ def build_planner_prompt(
     execution_plan: str = "",
     os_type: str = "Windows",
 ) -> str:
-    """构建 Planner 系统提示词（便捷函数，向后兼容）
+    """构建 Worker 系统提示词（便捷函数，向后兼容）
+    
+    用于 Worker 模型在每步执行中选择动作。
     
     Args:
         task: 任务描述
@@ -163,7 +166,42 @@ def build_planner_prompt(
     )
 
 
+def build_planning_prompt(
+    task: str,
+    global_info: str = "",
+    focused_info: str = "",
+) -> str:
+    """构建 Planner 系统提示词（用于制定执行计划）
+    
+    使用 Calibrator 模型，根据任务和桌面状态制定执行计划。
+    
+    Args:
+        task: 用户任务描述
+        global_info: 全局动态信息表
+        focused_info: 当前聚焦元素信息
+        
+    Returns:
+        完整的计划制定提示词
+    """
+    parts = [
+        PLANNING_PROMPT,
+        "",
+        "## 用户任务",
+        "",
+        task,
+    ]
+    
+    if global_info:
+        parts.extend(["", "## 全局信息表", "", global_info])
+    
+    if focused_info:
+        parts.extend(["", "## 当前聚焦元素", "", focused_info])
+    
+    return "\n".join(parts)
+
+
 __all__ = [
     "PromptBuilder",
     "build_planner_prompt",
+    "build_planning_prompt",
 ]

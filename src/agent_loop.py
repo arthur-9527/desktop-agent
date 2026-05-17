@@ -25,6 +25,7 @@ from .accessibility_parser import (
 from .prompts import (
     PromptBuilder, 
     build_planner_prompt, 
+    build_planning_prompt,
     build_vision_grounding_prompt,
 )
 from .prompts.verification import (
@@ -149,8 +150,66 @@ class DeskAgent:
         # 视觉定位缓存
         self._vision_cache: dict = {}
     
+    async def _make_plan(self, task: str, info_table: str, focused_info: str) -> Optional[dict]:
+        """调用 Calibrator 模型制定执行计划
+        
+        Args:
+            task: 用户任务描述
+            info_table: 全局动态信息表
+            focused_info: 当前聚焦元素信息
+            
+        Returns:
+            包含 steps 列表的字典，失败返回 None
+        """
+        logger.info("=" * 50)
+        logger.info("[Planner] 开始制定执行计划")
+        logger.info(f"[Planner] 任务: {task[:200]}{'...' if len(task) > 200 else ''}")
+        
+        try:
+            # 构建计划制定 prompt
+            planning_prompt = build_planning_prompt(
+                task=task,
+                global_info=info_table,
+                focused_info=focused_info,
+            )
+            
+            # 调用 Calibrator 模型
+            response = await self.calibrator_model.chat.completions.create(
+                model=self._get_verification_model_name(),
+                messages=[{"role": "user", "content": planning_prompt}],
+                max_tokens=8192,
+                temperature=0.1,
+            )
+            
+            output = response.choices[0].message.content or ""
+            
+            # 记录 token 使用
+            usage = getattr(response, 'usage', None)
+            if usage:
+                logger.info(f"[Planner] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
+            
+            # 解析 JSON
+            result = self._parse_planner_output(output)
+            if result and result.get("steps"):
+                steps = result["steps"]
+                logger.info(f"[Planner] 计划制定成功: {len(steps)} 个步骤")
+                for i, step in enumerate(steps):
+                    logger.info(f"[Planner]   步骤 {i+1}: {step}")
+                return result
+            else:
+                logger.warning(f"[Planner] 计划制定失败: 输出中缺少 steps")
+                logger.debug(f"[Planner] 原始输出:\n{output[:500]}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"[Planner] 调用异常: {type(e).__name__}: {e}")
+            return None
+    
     async def run(self, task: str) -> dict:
-        """执行任务（三模型架构）
+        """执行任务（Planner + Worker 双架构）
+        
+        Planner (Calibrator 模型): 任务开始时制定全局执行计划
+        Worker (Planner 模型): 每步执行动作
         
         Args:
             task: 任务描述
@@ -186,19 +245,28 @@ class DeskAgent:
         # 初始化 PromptBuilder（复用缓存）
         self._prompt_builder = PromptBuilder(os_type=os_type)
         
-        # 构建 Planner system prompt
+        # ========== 阶段 0: Planner 制定执行计划 ==========
+        plan_result = await self._make_plan(task, info_table, focused_info)
+        if plan_result and plan_result.get("steps"):
+            self._execution_plan = ExecutionPlan(plan_result["steps"])
+            logger.info(f"[Planner] 最终计划: {self._execution_plan.summary()}")
+        else:
+            logger.warning("[Planner] 计划制定失败，将在执行中逐步制定")
+        
+        # 构建 Worker system prompt（包含已制定的计划）
+        execution_plan_text = self._execution_plan.format() if self._execution_plan else ""
         system_prompt = self._prompt_builder.build_system_message(
             global_info=info_table,
             focused_info=focused_info,
-            execution_plan="",
+            execution_plan=execution_plan_text,
             history="",
             instruction=task
         )
         
-        # Planner 消息历史
+        # Worker 消息历史
         messages = [{"role": "system", "content": system_prompt}]
         
-        # 主循环
+        # 主循环（Worker 执行）
         for step in range(self.max_steps):
             logger.info("=" * 50)
             logger.info(f"Step {step + 1}/{self.max_steps}")
@@ -209,7 +277,7 @@ class DeskAgent:
                 action_type="unknown"
             )
             
-            # ========== Step 1: Planner 决策 ==========
+            # ========== Step 1: Worker 决策 ==========
             timer = MetricsTimer()
             timer.start()
             
@@ -220,7 +288,7 @@ class DeskAgent:
             user_content = self._build_user_message(step, info_table)
             messages.append({"role": "user", "content": user_content})
             
-            # 调用 Planner LLM（带重试机制）
+            # 调用 Worker 模型（带重试机制）
             max_retries = 3
             planner_output = None
             
@@ -242,35 +310,35 @@ class DeskAgent:
                         # 记录 token 使用情况
                         usage = getattr(response, 'usage', None)
                         if usage:
-                            logger.info(f"[Planner] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
+                            logger.info(f"[Worker] Token 使用: prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, total={usage.total_tokens}")
                         
                         # 检查输出是否为空
                         if not planner_output.strip():
-                            logger.warning(f"[Planner] 输出为空, finish_reason={finish_reason}")
+                            logger.warning(f"[Worker] 输出为空, finish_reason={finish_reason}")
                             if retry < max_retries - 1:
-                                logger.info(f"[Planner] 重试 {retry + 2}/{max_retries}...")
+                                logger.info(f"[Worker] 重试 {retry + 2}/{max_retries}...")
                                 await asyncio.sleep(0.5)
                                 continue
                         else:
                             # 输出正常，退出重试循环
                             break
                     else:
-                        logger.warning(f"[Planner] API 响应无 choices")
+                        logger.warning(f"[Worker] API 响应无 choices")
                         if retry < max_retries - 1:
-                            logger.info(f"[Planner] 重试 {retry + 2}/{max_retries}...")
+                            logger.info(f"[Worker] 重试 {retry + 2}/{max_retries}...")
                             await asyncio.sleep(0.5)
                             continue
                         
                 except Exception as e:
                     step_metric.planning_time_ms = timer.stop()
                     step_metric.error = str(e)
-                    logger.error(f"[Planner] API 调用异常: {type(e).__name__}: {e}")
+                    logger.error(f"[Worker] API 调用异常: {type(e).__name__}: {e}")
                     if retry < max_retries - 1:
-                        logger.info(f"[Planner] 重试 {retry + 2}/{max_retries}...")
+                        logger.info(f"[Worker] 重试 {retry + 2}/{max_retries}...")
                         await asyncio.sleep(0.5)
                         continue
                     else:
-                        logger.warning(f"[Planner] 达到最大重试次数，跳过此步")
+                        logger.warning(f"[Worker] 达到最大重试次数，跳过此步")
                         self._metrics.add_step(step_metric)
                         continue
             
@@ -278,20 +346,20 @@ class DeskAgent:
             
             # 检查是否有有效输出
             if not planner_output or not planner_output.strip():
-                logger.warning(f"[Planner] 输出为空，跳过此步")
-                self._history.add(f"Step {step + 1}: Planner 输出为空")
+                logger.warning(f"[Worker] 输出为空，跳过此步")
+                self._history.add(f"Step {step + 1}: Worker 输出为空")
                 step_metric.error = "Planner 输出为空"
                 self._metrics.add_step(step_metric)
                 continue
             
-            logger.info(f"[Planner] 输出: {planner_output[:200]}{'...' if len(planner_output) > 200 else ''}")
+            logger.info(f"[Worker] 输出: {planner_output[:200]}{'...' if len(planner_output) > 200 else ''}")
             
             # 解析 Planner 输出
             parsed = self._parse_planner_output(planner_output)
             
             if parsed is None:
-                logger.warning(f"[Planner] JSON 解析失败")
-                logger.debug(f"[Planner] 原始输出内容:\n{planner_output[:500]}{'...' if len(planner_output) > 500 else ''}")
+                logger.warning(f"[Worker] JSON 解析失败")
+                logger.debug(f"[Worker] 原始输出内容:\n{planner_output[:500]}{'...' if len(planner_output) > 500 else ''}")
                 self._history.add(f"Step {step + 1}: 解析失败 - {planner_output[:100]}")
                 step_metric.error = "JSON 解析失败"
                 self._metrics.add_step(step_metric)
@@ -299,19 +367,6 @@ class DeskAgent:
             
             use_vision_prompt = parsed.get("use_vision_prompt")
             action_str = parsed.get("action", "")
-            
-            # 提取计划状态
-            plan_status = parsed.get("plan_status")
-            if plan_status:
-                steps = plan_status.get("steps", [])
-                current = plan_status.get("current", 0)
-                completed = plan_status.get("completed", [])
-                if steps:
-                    # 更新执行计划
-                    self._execution_plan = ExecutionPlan(steps)
-                    self._execution_plan.current = current
-                    self._execution_plan.completed = completed
-                    logger.info(f"[计划] 更新计划: {self._execution_plan.summary()}")
             
             step_metric.action = action_str
             step_metric.action_type = self._extract_action_type(action_str)

@@ -50,7 +50,7 @@ prompt_text = build_verification_prompt("验证保存成功")
 """
 
 # 主要导出
-from .builder import PromptBuilder, build_planner_prompt
+from .builder import PromptBuilder, build_planner_prompt, build_planning_prompt
 from .vision_grounding import build_vision_grounding_prompt, VISION_GROUNDING_PROMPT
 from .verification import build_verification_prompt, build_verification_message, VERIFICATION_PROMPT
 
@@ -62,6 +62,7 @@ from .static import (
     OUTPUT_FORMAT,
     VERIFICATION_METHODS,
     get_shortcuts,
+    PLANNING_PROMPT,
 )
 
 # 动态提示词导出
@@ -78,6 +79,7 @@ __all__ = [
     
     # 便捷函数
     "build_planner_prompt",
+    "build_planning_prompt",
     "build_vision_grounding_prompt",
     "build_verification_prompt",
     "build_verification_message",
@@ -95,6 +97,7 @@ __all__ = [
     "VERIFICATION_METHODS",
     "VISION_GROUNDING_PROMPT",
     "VERIFICATION_PROMPT",
+    "PLANNING_PROMPT",
     
     # 工具函数
     "get_shortcuts",
